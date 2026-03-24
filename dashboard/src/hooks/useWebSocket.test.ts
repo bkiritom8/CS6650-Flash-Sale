@@ -4,13 +4,15 @@ import { useWebSocket } from './useWebSocket'
 
 class MockWebSocket {
   static OPEN = 1
+  url: string
   readyState = MockWebSocket.OPEN
   onopen: (() => void) | null = null
   onmessage: ((e: { data: string }) => void) | null = null
   onclose: (() => void) | null = null
   onerror: (() => void) | null = null
   close = vi.fn()
-  constructor(public url: string) {
+  constructor(url: string) {
+    this.url = url
     setTimeout(() => this.onopen?.(), 0)
   }
 }

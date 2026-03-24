@@ -1,4 +1,3 @@
-import React from 'react'
 import { PanelWrapper } from './PanelWrapper'
 import { MetricCard } from './MetricCard'
 import { useMetrics } from '../context/MetricsContext'

@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { PanelWrapper } from './PanelWrapper'
 import { useMetrics } from '../context/MetricsContext'
 import type { PolicyToggle } from '../types/metrics'

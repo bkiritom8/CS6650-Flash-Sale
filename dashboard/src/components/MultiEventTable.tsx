@@ -1,4 +1,3 @@
-import React from 'react'
 import { PanelWrapper } from './PanelWrapper'
 import { useMetrics } from '../context/MetricsContext'
 import type { EventData } from '../types/metrics'

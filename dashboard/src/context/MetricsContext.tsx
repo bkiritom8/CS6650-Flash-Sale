@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState } from 'react'
+import { type ReactNode, createContext, useContext, useState } from 'react'
 import { useWebSocket } from '../hooks/useWebSocket'
 import type { MetricsPayload, ConnectionStatus, ExperimentId } from '../types/metrics'
 
@@ -11,7 +11,7 @@ interface MetricsContextValue {
 
 const MetricsContext = createContext<MetricsContextValue | null>(null)
 
-export function MetricsProvider({ children }: { children: React.ReactNode }) {
+export function MetricsProvider({ children }: { children: ReactNode }) {
   const { metrics, status } = useWebSocket('ws://localhost:8080/ws/metrics')
   const [experiment, setExperiment] = useState<ExperimentId>(1)
 

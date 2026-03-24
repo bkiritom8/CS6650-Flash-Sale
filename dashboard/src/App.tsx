@@ -1,4 +1,3 @@
-import React from 'react'
 import { TopBar } from './components/TopBar'
 import { MetricCards } from './components/MetricCards'
 import { ResponseTimeChart } from './components/ResponseTimeChart'

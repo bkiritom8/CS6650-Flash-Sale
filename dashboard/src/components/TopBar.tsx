@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { useMetrics } from '../context/MetricsContext'
 import type { ExperimentId } from '../types/metrics'
 

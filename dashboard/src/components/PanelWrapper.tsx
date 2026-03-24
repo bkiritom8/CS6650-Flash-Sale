@@ -1,10 +1,10 @@
-import React from 'react'
+import { type ReactNode } from 'react'
 import { useMetrics } from '../context/MetricsContext'
 import { EXPERIMENT_PANELS } from '../types/metrics'
 
 interface PanelWrapperProps {
   panelId: string
-  children: React.ReactNode
+  children: ReactNode
   className?: string
 }
 
