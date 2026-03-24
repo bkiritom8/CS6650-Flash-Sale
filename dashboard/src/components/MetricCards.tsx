@@ -8,7 +8,7 @@ export function MetricCards() {
 
   return (
     <PanelWrapper panelId="metric-cards">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-6">
+      <div className="metrics-grid">
         <MetricCard label="Queue Depth" value={metrics.queue_depth.toLocaleString()} />
         <MetricCard label="Bookings / sec" value={metrics.bookings_per_sec} />
         <MetricCard label="Oversell Events" value={metrics.oversell_count} />

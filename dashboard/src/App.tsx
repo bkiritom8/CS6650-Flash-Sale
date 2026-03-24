@@ -7,29 +7,29 @@ import { FairnessPanel } from './components/FairnessPanel'
 
 export default function App() {
   return (
-    <div className="min-h-screen" style={{ backgroundColor: 'var(--color-bg)' }}>
+    <div>
       <TopBar />
-      <main className="max-w-screen-xl mx-auto px-4 py-6 flex flex-col gap-4">
+      <main className="dashboard-container">
 
         {/* Row 1: 4 metric cards — full width */}
         <MetricCards />
 
         {/* Row 2: response time chart (2/3) + locking comparison (1/3) */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2">
+        <div className="grid-cols-3">
+          <div className="col-span-2">
             <ResponseTimeChart />
           </div>
-          <div className="lg:col-span-1">
+          <div className="col-span-1">
             <LockingComparisonPanel />
           </div>
         </div>
 
         {/* Row 3: multi-event table (2/3) + fairness panel (1/3) */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2">
+        <div className="grid-cols-3">
+          <div className="col-span-2">
             <MultiEventTable />
           </div>
-          <div className="lg:col-span-1">
+          <div className="col-span-1">
             <FairnessPanel />
           </div>
         </div>

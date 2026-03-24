@@ -13,10 +13,10 @@ import { useMetrics } from '../context/MetricsContext'
 Chart.register(BarController, BarElement, LinearScale, CategoryScale, Tooltip)
 
 const STRATEGIES = ['No-lock', 'Optimistic', 'Pessimistic']
-const COLORS      = ['#ef4444', '#3b82f6', '#9ca3af']
+const COLORS      = ['#ef4444', '#3b82f6', '#10b981'] // Replaced pessimistic color with green
 
 function gridColor(): string {
-  return getComputedStyle(document.documentElement).getPropertyValue('--color-grid').trim() || '#f3f4f6'
+  return 'rgba(255, 255, 255, 0.05)'
 }
 
 interface HBarChartProps {
@@ -49,19 +49,26 @@ function HBarChart({ canvasId, title, data, unit }: HBarChartProps) {
         indexAxis: 'y',
         responsive: true,
         maintainAspectRatio: false,
-        animation: false,
+        animation: { duration: 0 },
         plugins: {
           legend: { display: false },
-          tooltip: { callbacks: { label: ctx => ` ${ctx.raw}${unit}` } },
+          tooltip: {
+            callbacks: { label: ctx => ` ${ctx.raw}${unit}` },
+            backgroundColor: 'rgba(15, 17, 21, 0.9)',
+            titleColor: '#ffffff',
+            bodyColor: '#ffffff',
+            borderColor: 'rgba(255,255,255,0.1)',
+            borderWidth: 1
+          },
         },
         scales: {
           x: {
             grid: { color: gc },
-            ticks: { color: '#6b7280', font: { size: 11 }, callback: v => `${v}${unit}` },
+            ticks: { color: '#9ca3af', font: { size: 11, family: 'Inter' }, callback: v => `${v}${unit}` },
           },
           y: {
             grid: { display: false },
-            ticks: { color: '#374151', font: { size: 12 } },
+            ticks: { color: '#d1d5db', font: { size: 12, family: 'Inter' } },
           },
         },
       },
@@ -77,10 +84,10 @@ function HBarChart({ canvasId, title, data, unit }: HBarChartProps) {
 
   return (
     <div>
-      <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
+      <h3 className="chart-title text-secondary" style={{ textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: '0.75rem', marginBottom: '8px' }}>
         {title}
       </h3>
-      <div className="h-24">
+      <div className="bar-chart-container">
         <canvas ref={canvasRef} id={canvasId} />
       </div>
     </div>
@@ -97,12 +104,14 @@ export function LockingComparisonPanel() {
 
   return (
     <PanelWrapper panelId="locking-comparison">
-      <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">
-        Locking Strategy Comparison
-      </h2>
-      <div className="flex flex-col gap-5">
+      <div className="chart-header" style={{ marginBottom: '16px' }}>
+        <h2 className="chart-title" style={{ margin: 0 }}>
+          Locking Strategy Comparison
+        </h2>
+      </div>
+      <div className="flex-col" style={{ gap: '20px' }}>
         <HBarChart canvasId="chart-oversells" title="Oversell Count"   data={oversells} unit=""    />
-        <div className="border-t border-gray-100 dark:border-gray-700" />
+        <div className="section-divider" />
         <HBarChart canvasId="chart-p95"       title="P95 Latency (ms)" data={p95}       unit="ms" />
       </div>
     </PanelWrapper>
