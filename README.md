@@ -1,4 +1,4 @@
-# Concert Ticket Platform — Instructions
+# Concert Ticket Platform
 
 ## Prerequisites
 
@@ -47,7 +47,7 @@ All of these are Terraform variables too — override them in `terraform/main/va
 
 ---
 
-## Deploying the Platform (Abhishek)
+## Deploying the Platform
 
 ### Step 1 — Configure AWS credentials
 
@@ -57,10 +57,15 @@ export AWS_REGION=us-east-1
 aws sts get-caller-identity
 ```
 
-### Step 2 — Deploy everything
+### Step 2 — Make scripts executable (first time only)
 
 ```bash
-cd concert-ticket-platform
+chmod +x scripts/deploy.sh scripts/cleanup.sh scripts/test-platform.sh
+```
+
+### Step 3 — Deploy everything
+
+```bash
 ./scripts/deploy.sh
 ```
 
@@ -74,22 +79,13 @@ This will:
 
 **Expected time: 8–12 minutes** (RDS takes the longest)
 
-### Step 3 — Verify
+### Step 4 — Verify
 
 ```bash
 ./scripts/test-platform.sh
 ```
 
 This runs a full smoke test — health checks, all endpoints, a real booking, a real queue join. You should see all `[PASS]` before handing off to teammates.
-
-### Step 4 — Note your ALB URL
-
-```bash
-cd terraform/main
-terraform output alb_dns_name
-```
-
-Share this URL with all teammates. All services are reachable through it.
 
 ---
 
@@ -114,7 +110,7 @@ terraform apply -auto-approve -var="db_backend=mysql"
 
 ---
 
-## Tearing Down (Abhishek / end of session)
+## Tearing Down
 
 ```bash
 ./scripts/cleanup.sh
@@ -125,7 +121,7 @@ Type `yes` when prompted. This destroys everything — NAT Gateway, RDS, ECS, EC
 
 ---
 
-## For Teammates — Experiment Guide
+## TO DO — Experiment Guide
 
 All experiments are controlled through environment variables passed to Terraform or via the runtime API endpoints on the queue service. No Go code changes are needed for any experiment.
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -106,6 +107,24 @@ func (r *DynamoDBRepo) CancelBooking(ctx context.Context, bookingID string) erro
 func (r *DynamoDBRepo) CheckAndReserveNoLock(ctx context.Context, eventID, seatID string, b *Booking) error {
 	vk := r.versionKey(eventID, seatID)
 
+	// Ensure record exists
+	_, err := r.client.PutItem(ctx, &dynamodb.PutItemInput{
+		TableName:           aws.String(r.versionsTable),
+		ConditionExpression: aws.String("attribute_not_exists(seat_id)"),
+		Item: map[string]types.AttributeValue{
+			"event_id": &types.AttributeValueMemberS{Value: eventID},
+			"seat_id":  &types.AttributeValueMemberS{Value: seatID},
+			"version":  &types.AttributeValueMemberN{Value: "0"},
+			"status":   &types.AttributeValueMemberS{Value: "available"},
+		},
+	})
+	if err != nil {
+		var condErr *types.ConditionalCheckFailedException
+		if !errors.As(err, &condErr) {
+			return fmt.Errorf("init seat version %s: %w", seatID, err)
+		}
+	}
+
 	out, err := r.client.GetItem(ctx, &dynamodb.GetItemInput{
 		TableName: aws.String(r.versionsTable),
 		Key:       vk,
@@ -117,7 +136,6 @@ func (r *DynamoDBRepo) CheckAndReserveNoLock(ctx context.Context, eventID, seatI
 	if out.Item != nil {
 		status := out.Item["status"].(*types.AttributeValueMemberS).Value
 		if status != "available" {
-			// Record oversell — intentionally continue anyway
 			_, _ = r.client.PutItem(ctx, &dynamodb.PutItemInput{
 				TableName: aws.String(r.oversellsTable),
 				Item: map[string]types.AttributeValue{
@@ -130,7 +148,6 @@ func (r *DynamoDBRepo) CheckAndReserveNoLock(ctx context.Context, eventID, seatI
 		}
 	}
 
-	// Write booking without any condition — unsafe by design
 	return r.CreateBooking(ctx, b)
 }
 
@@ -207,12 +224,33 @@ func (r *DynamoDBRepo) CheckAndReserveOptimistic(ctx context.Context, eventID, s
 func (r *DynamoDBRepo) CheckAndReservePessimistic(ctx context.Context, eventID, seatID string, b *Booking) error {
 	vk := r.versionKey(eventID, seatID)
 
+	// Ensure the seat version record exists before attempting to lock it
+	_, err := r.client.PutItem(ctx, &dynamodb.PutItemInput{
+		TableName:           aws.String(r.versionsTable),
+		ConditionExpression: aws.String("attribute_not_exists(seat_id)"),
+		Item: map[string]types.AttributeValue{
+			"event_id":    &types.AttributeValueMemberS{Value: eventID},
+			"seat_id":     &types.AttributeValueMemberS{Value: seatID},
+			"version":     &types.AttributeValueMemberN{Value: "0"},
+			"status":      &types.AttributeValueMemberS{Value: "available"},
+			"in_progress": &types.AttributeValueMemberBOOL{Value: false},
+		},
+	})
+	// Ignore ConditionalCheckFailedException — means record already exists, that's fine
+	if err != nil {
+		var condErr *types.ConditionalCheckFailedException
+		if !errors.As(err, &condErr) {
+			return fmt.Errorf("init seat version %s: %w", seatID, err)
+		}
+	}
+
 	// Acquire "lock" — set in_progress flag atomically, fail if already set or reserved
-	_, err := r.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
-		TableName: aws.String(r.versionsTable),
-		Key:       vk,
-		UpdateExpression:    aws.String("SET in_progress = :t"),
-		ConditionExpression: aws.String("#s = :available AND (attribute_not_exists(in_progress) OR in_progress = :f)"),
+	_, err = r.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName:        aws.String(r.versionsTable),
+		Key:              vk,
+		UpdateExpression: aws.String("SET in_progress = :t"),
+		ConditionExpression: aws.String(
+			"#s = :available AND (attribute_not_exists(in_progress) OR in_progress = :f)"),
 		ExpressionAttributeNames: map[string]string{"#s": "status"},
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":available": &types.AttributeValueMemberS{Value: "available"},

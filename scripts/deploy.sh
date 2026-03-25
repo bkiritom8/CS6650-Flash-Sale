@@ -68,7 +68,7 @@ for svc in inventory-service booking-service queue-service; do
   IMAGE="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${REPO}:latest"
   echo ""
   echo "--- Building ${svc}..."
-  docker build -t "$IMAGE" "${ROOT_DIR}/src/${svc}"
+  docker build --platform linux/amd64 -t "$IMAGE" "${ROOT_DIR}/src/${svc}"
   echo "--- Pushing ${svc}..."
   docker push "$IMAGE"
 done
