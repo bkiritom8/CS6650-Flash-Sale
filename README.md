@@ -20,7 +20,10 @@ concert-ticket-platform/
 ├── src/
 │   ├── inventory-service/   # Manages events and seats
 │   ├── booking-service/     # Handles bookings + concurrency control
-│   └── queue-service/       # Virtual waiting room
+│   ├── queue-service/       # Virtual waiting room
+│   └── experiment1/         # Experiment 1: concurrency control load test
+│       ├── terraform/       # Self-contained infra (ECR, ECS, ALB rule)
+│       └── scripts/         # deploy.sh, cleanup.sh, test.sh
 ├── terraform/
 │   ├── main/                # Root config — run all Terraform from here
 │   └── modules/             # alb, autoscaling, dynamodb, ecr, ecs, logging, network, rds
@@ -42,6 +45,8 @@ concert-ticket-platform/
 | `ADMISSION_RATE` | queue | integer (admissions/sec) | `10` |
 | `FAIRNESS_MODE` | queue | `collapse` \| `allow_multiple` | `allow_multiple` |
 | `AUTOSCALING_CPU_TARGET` | Terraform var | integer (%) | `70` |
+| `MYSQL_HOST` | experiment1 | RDS hostname | _(set by Terraform)_ |
+| `DYNAMODB_BOOKINGS_TABLE` | experiment1 | DynamoDB table name | _(set by Terraform)_ |
 
 All of these are Terraform variables too — override them in `terraform/main/variables.tf` or pass `-var` flags.
 
@@ -70,9 +75,9 @@ chmod +x scripts/deploy.sh scripts/cleanup.sh scripts/test-platform.sh
 ```
 
 This will:
-1. Run `go mod tidy` on all three services
+1. Run `go mod tidy` on all three platform services
 2. Run `terraform init` and `terraform apply`
-3. Build all three Docker images locally
+3. Build all three Docker images locally with `--platform linux/amd64`
 4. Push them to ECR
 5. Provision: VPC, NAT, ALB, RDS MySQL, DynamoDB (5 tables), ECS (3 services), CloudWatch
 6. Wait for all health checks to pass
@@ -85,11 +90,9 @@ This will:
 ./scripts/test-platform.sh
 ```
 
-<<<<<<< HEAD
 This runs a full smoke test — health checks, all endpoints, a real booking, a real queue join. You should see all `[PASS]` before handing off to teammates.
-=======
-This runs a smoke test.
->>>>>>> 2a97134d320d594889aeaabebcd91464202f2163
+
+For experiment1 specifically: `./src/experiment1/scripts/test.sh`
 
 ---
 
@@ -124,39 +127,96 @@ Type `yes` when prompted. This destroys everything — NAT Gateway, RDS, ECS, EC
 
 ---
 
-<<<<<<< HEAD
-## TO DO — Experiment Guide
-=======
-## FUTURE WORK — Experiment Guide
->>>>>>> 2a97134d320d594889aeaabebcd91464202f2163
+## Experiment Guide
 
 All experiments are controlled through environment variables passed to Terraform or via the runtime API endpoints on the queue service. No Go code changes are needed for any experiment.
 
-### Experiment 1 — Concurrency Control
+### Experiment 1 — Concurrency Control Under Flash Sale Load
 
-**What to change:** `LOCK_MODE` on the booking service.
+**Service:** `http://<ALB>/experiment1`
 
+Simulates N users (default 1000) simultaneously booking the last available seat.
+Tests three strategies against both MySQL (RDS) and DynamoDB in a single HTTP call.
+Has its own Terraform and scripts — deploy and tear down independently of the main platform.
+
+**Deploy experiment1 (run main platform deploy first):**
 ```bash
-cd terraform/main
+# Deploy
+cd src/experiment1
+./scripts/deploy.sh
+
+# Run all tests (correctness assertions + all 6 mode×backend combos)
+./scripts/test.sh
+
+# Tear down experiment1 only (main platform untouched)
+./scripts/cleanup.sh
+```
+
+**Run an experiment:**
+```bash
+ALB=$(cd terraform/main && terraform output -raw alb_dns_name)
 
 # Baseline — no concurrency control (oversells expected)
-terraform apply -auto-approve -var="lock_mode=none"
+curl -s -X POST http://$ALB/experiment1/api/v1/run \
+  -H "Content-Type: application/json" \
+  -d '{"lock_mode":"none","db_backend":"mysql","concurrency":1000}' | jq .
 
-# Optimistic locking
-terraform apply -auto-approve -var="lock_mode=optimistic"
+# Optimistic locking — MySQL
+curl -s -X POST http://$ALB/experiment1/api/v1/run \
+  -H "Content-Type: application/json" \
+  -d '{"lock_mode":"optimistic","db_backend":"mysql","concurrency":1000,"max_retries":3}' | jq .
 
-# Pessimistic locking (default)
-terraform apply -auto-approve -var="lock_mode=pessimistic"
+# Pessimistic locking — MySQL
+curl -s -X POST http://$ALB/experiment1/api/v1/run \
+  -H "Content-Type: application/json" \
+  -d '{"lock_mode":"pessimistic","db_backend":"mysql","concurrency":1000}' | jq .
+
+# All three modes — DynamoDB (swap db_backend)
+curl -s -X POST http://$ALB/experiment1/api/v1/run \
+  -H "Content-Type: application/json" \
+  -d '{"lock_mode":"none","db_backend":"dynamodb","concurrency":1000}' | jq .
 ```
 
-**What to measure:** Hit `POST /booking/api/v1/bookings` concurrently with Locust.
-After each run, check oversell count:
+**Response fields:**
+
+| Field | Description |
+|---|---|
+| `successful_bookings` | Goroutines that wrote a booking |
+| `failed_bookings` | Goroutines that got a conflict/retry-exhausted error |
+| `oversell_count` | DB-verified double-bookings (should be 0 for optimistic/pessimistic) |
+| `oversell_rate_pct` | `oversell_count / concurrency × 100` |
+| `total_duration_ms` | Wall time from first goroutine start to last finish |
+| `latency_ms.min/max/mean/p99` | Per-attempt latency across all goroutines |
+
+**Expected results:**
+
+| Strategy | Backend | Successful | Oversells | Latency |
+|---|---|---|---|---|
+| `none` | MySQL | ~1000 | ~999 | Low |
+| `optimistic` | MySQL | 1 | 0 | Medium (retries) |
+| `pessimistic` | MySQL | 1 | 0 | High (serialised lock) |
+| `none` | DynamoDB | ~1000 | ~999 | Low |
+| `optimistic` | DynamoDB | 1 | 0 | Medium |
+| `pessimistic` | DynamoDB | 1 | 0 | Medium (atomic txn) |
+
+**How it works internally:**
+- Each run generates a unique `event_id` so runs never interfere.
+- All goroutines block on a shared channel then release simultaneously to maximise contention.
+- MySQL pessimistic uses `SELECT ... FOR UPDATE` (row-level lock, queuing writers).
+- DynamoDB pessimistic uses `TransactWriteItems` (atomic condition-check + update + put).
+- After the run, data is cleaned up automatically.
+
+**CloudWatch logs:**
 ```bash
-curl http://<ALB>/booking/api/v1/metrics?event_id=evt-001
+aws logs tail /ecs/concert-platform-experiment1 --follow --region us-east-1
 ```
-Key fields: `oversell_count`, `bookings_per_sec`, `lock_mode`.
 
-**CloudWatch metrics to capture:** ECS CPU, response time from ALB target group.
+**Terraform (experiment1 only):**
+```bash
+cd src/experiment1/terraform
+terraform output          # show URL, ECR repo, cluster name
+terraform destroy         # remove experiment1 infra only
+```
 
 ---
 
@@ -300,6 +360,10 @@ ALB=$(cd terraform/main && terraform output -raw alb_dns_name)
 curl http://$ALB/inventory/health
 curl http://$ALB/booking/health
 curl http://$ALB/queue/health
+curl http://$ALB/experiment1/health
+
+# Tail CloudWatch logs for experiment1
+aws logs tail /ecs/concert-platform-experiment1 --follow --region us-east-1
 ```
 
 ---
@@ -338,6 +402,13 @@ curl http://$ALB/queue/health
 | GET | `/api/v1/queue/event/:event_id/metrics` | Single event queue metrics |
 | POST | `/api/v1/queue/event/:event_id/admission-rate` | Change rate `{"rate":20}` |
 | POST | `/api/v1/queue/event/:event_id/fairness-mode` | Change mode `{"mode":"collapse"}` |
+
+### Experiment 1 Service — `http://<ALB>/experiment1`
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/health` | Health check |
+| POST | `/api/v1/run` | Run concurrency experiment `{"lock_mode","db_backend","concurrency","max_retries"}` |
 
 ---
 

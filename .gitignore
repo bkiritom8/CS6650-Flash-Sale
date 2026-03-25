@@ -13,6 +13,11 @@
 src/*/inventory-service
 src/*/booking-service
 src/*/queue-service
+src/experiment1/experiment1
+
+# Node
+node_modules/
+dist/
 
 # Test output
 results/
