@@ -85,7 +85,11 @@ This will:
 ./scripts/test-platform.sh
 ```
 
+<<<<<<< HEAD
 This runs a full smoke test — health checks, all endpoints, a real booking, a real queue join. You should see all `[PASS]` before handing off to teammates.
+=======
+This runs a smoke test.
+>>>>>>> 2a97134d320d594889aeaabebcd91464202f2163
 
 ---
 
@@ -117,11 +121,14 @@ terraform apply -auto-approve -var="db_backend=mysql"
 ```
 
 Type `yes` when prompted. This destroys everything — NAT Gateway, RDS, ECS, ECR, DynamoDB.
-**Always run this when done to avoid charges.**
 
 ---
 
+<<<<<<< HEAD
 ## TO DO — Experiment Guide
+=======
+## FUTURE WORK — Experiment Guide
+>>>>>>> 2a97134d320d594889aeaabebcd91464202f2163
 
 All experiments are controlled through environment variables passed to Terraform or via the runtime API endpoints on the queue service. No Go code changes are needed for any experiment.
 
