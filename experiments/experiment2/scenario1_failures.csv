@@ -1,0 +1,2 @@
+Method,Name,Error,Occurrences
+POST,/api/v1/bookings,"CatchResponseError('Unexpected status code: 400. Failed to place order: {""error"":""INVALID_INPUT"",""message"":""Key: \'CreateBookingRequest.SeatID\' Error:Field validation for \'SeatID\' failed on the \'required\' tag""}')",28108
