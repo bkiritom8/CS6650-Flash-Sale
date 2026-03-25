@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -143,6 +144,76 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (*ExperimentResult, er
 		CompletedAt:        completedAt,
 	}, nil
 }
+
+// ── Single-operation methods (used by Locust-facing HTTP endpoints) ───────────
+
+func (r *Runner) InitSeat(ctx context.Context, dbBackend DBBackend, eventID, seatID string) error {
+	repo, err := r.repoFor(dbBackend)
+	if err != nil {
+		return err
+	}
+	return repo.InitSeat(ctx, eventID, seatID)
+}
+
+// BookSingle processes one booking attempt from a Locust worker.
+// got=true means this worker won the seat.
+// got=false, err=nil means the seat was taken (expected for most workers).
+// err!=nil means an actual infrastructure error.
+func (r *Runner) BookSingle(ctx context.Context, req BookSeatRequest) (got bool, err error) {
+	repo, err := r.repoFor(req.DBBackend)
+	if err != nil {
+		return false, err
+	}
+	maxRetries := req.MaxRetries
+	if maxRetries <= 0 {
+		maxRetries = 3
+	}
+	switch req.LockMode {
+	case LockNone:
+		_, err = repo.BookNoLock(ctx, req.EventID, req.SeatID, req.BookingID)
+		return err == nil, err
+	case LockOptimistic:
+		err = repo.BookOptimistic(ctx, req.EventID, req.SeatID, req.BookingID, maxRetries)
+		if isSeatUnavailable(err) {
+			return false, nil
+		}
+		return err == nil, err
+	case LockPessimistic:
+		err = repo.BookPessimistic(ctx, req.EventID, req.SeatID, req.BookingID)
+		if isSeatUnavailable(err) {
+			return false, nil
+		}
+		return err == nil, err
+	}
+	return false, fmt.Errorf("unknown lock_mode %q", req.LockMode)
+}
+
+func (r *Runner) GetResults(ctx context.Context, dbBackend DBBackend, eventID, seatID string) (bookings, oversells int, err error) {
+	repo, err := r.repoFor(dbBackend)
+	if err != nil {
+		return
+	}
+	bookings, err = repo.CountBookings(ctx, eventID, seatID)
+	if err != nil {
+		return
+	}
+	oversells, err = repo.CountOversells(ctx, eventID, seatID)
+	return
+}
+
+func (r *Runner) CleanupSeat(ctx context.Context, dbBackend DBBackend, eventID, seatID string) error {
+	repo, err := r.repoFor(dbBackend)
+	if err != nil {
+		return err
+	}
+	return repo.Cleanup(ctx, eventID, seatID)
+}
+
+func isSeatUnavailable(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "seat not available")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 func (r *Runner) repoFor(backend DBBackend) (Repository, error) {
 	switch backend {

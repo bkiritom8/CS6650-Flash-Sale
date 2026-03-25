@@ -59,3 +59,36 @@ type ErrorResponse struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`
 }
+
+// ── Locust-facing single-operation types ──────────────────────────────────────
+
+// InitSeatRequest sets up a fresh seat for one Locust test run.
+type InitSeatRequest struct {
+	EventID   string    `json:"event_id"   binding:"required"`
+	SeatID    string    `json:"seat_id"    binding:"required"`
+	DBBackend DBBackend `json:"db_backend" binding:"required"`
+}
+
+// BookSeatRequest is one booking attempt, sent by each Locust worker.
+type BookSeatRequest struct {
+	EventID    string    `json:"event_id"   binding:"required"`
+	SeatID     string    `json:"seat_id"    binding:"required"`
+	BookingID  string    `json:"booking_id" binding:"required"`
+	LockMode   LockMode  `json:"lock_mode"  binding:"required"`
+	DBBackend  DBBackend `json:"db_backend" binding:"required"`
+	MaxRetries int       `json:"max_retries"`
+}
+
+// BookSeatResponse is returned per booking attempt.
+type BookSeatResponse struct {
+	BookingID string `json:"booking_id"`
+	Success   bool   `json:"success"`
+}
+
+// SeatResultsResponse summarises the outcome after a Locust run.
+type SeatResultsResponse struct {
+	EventID       string `json:"event_id"`
+	SeatID        string `json:"seat_id"`
+	BookingCount  int    `json:"booking_count"`
+	OversellCount int    `json:"oversell_count"`
+}
