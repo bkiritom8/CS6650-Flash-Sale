@@ -25,9 +25,8 @@ def make_booking(client, event_id, seat_number, customer_id):
     """
     payload = {
         "event_id":    event_id,
-        "seat_number": "{event_id}-seat-{seat_number}",
+        "seat_id": "{}-seat-{}".format(event_id, seat_number),
         "customer_id": customer_id,
-        # TODO: add any other required fields
     }
     with client.post(
         "/api/v1/bookings",
