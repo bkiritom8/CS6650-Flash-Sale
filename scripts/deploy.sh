@@ -23,7 +23,7 @@ chmod +x "${ROOT_DIR}/scripts/deploy.sh"
 chmod +x "${ROOT_DIR}/scripts/cleanup.sh"
 chmod +x "${ROOT_DIR}/scripts/test-platform.sh"
 
-# ── Terraform init + apply (provisions infra, skips if nothing changed) ───────
+# ── Terraform init + apply ────────────────────────────────────────────────────
 cd "${ROOT_DIR}/terraform/main"
 echo ""
 echo "--- Initialising Terraform..."
@@ -50,21 +50,17 @@ echo "================================================"
 echo ""
 
 # ── Always rebuild and push all Docker images ─────────────────────────────────
-# This ensures code changes are always deployed even when Terraform
-# detects no infrastructure changes.
 echo "--- Logging in to ECR..."
 aws ecr get-login-password --region "$AWS_REGION" | \
   docker login --username AWS \
   --password-stdin "${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
-declare -A SERVICE_REPOS=(
-  ["inventory-service"]="concert-inventory-service"
-  ["booking-service"]="concert-booking-service"
-  ["queue-service"]="concert-queue-service"
-)
-
 for svc in inventory-service booking-service queue-service; do
-  REPO="${SERVICE_REPOS[$svc]}"
+  case $svc in
+    inventory-service) REPO="concert-inventory-service" ;;
+    booking-service)   REPO="concert-booking-service" ;;
+    queue-service)     REPO="concert-queue-service" ;;
+  esac
   IMAGE="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${REPO}:latest"
   echo ""
   echo "--- Building ${svc}..."
@@ -77,14 +73,12 @@ done
 echo ""
 echo "--- Forcing ECS redeployment on all services..."
 
-declare -A ECS_SERVICES=(
-  ["concert-platform-inventory-cluster"]="concert-platform-inventory"
-  ["concert-platform-booking-cluster"]="concert-platform-booking"
-  ["concert-platform-queue-cluster"]="concert-platform-queue"
-)
-
-for cluster in "${!ECS_SERVICES[@]}"; do
-  svc="${ECS_SERVICES[$cluster]}"
+for svc in concert-platform-inventory concert-platform-booking concert-platform-queue; do
+  case $svc in
+    concert-platform-inventory) cluster="concert-platform-inventory-cluster" ;;
+    concert-platform-booking)   cluster="concert-platform-booking-cluster" ;;
+    concert-platform-queue)     cluster="concert-platform-queue-cluster" ;;
+  esac
   echo "    Redeploying ${svc}..."
   aws ecs update-service \
     --cluster "$cluster" \
