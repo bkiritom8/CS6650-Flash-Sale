@@ -46,8 +46,8 @@ Write-Host ""
 
 # ── Log in to ECR ─────────────────────────────────────────────────────────────
 Write-Host "--- Logging in to ECR..."
-aws ecr get-login-password --region $AWS_REGION |
-    docker login --username AWS --password-stdin "$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+$password = aws ecr get-login-password --region $AWS_REGION
+docker login --username AWS --password $password "$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
 
 # ── Build and push Docker images ──────────────────────────────────────────────
 $SERVICE_REPOS = @{
