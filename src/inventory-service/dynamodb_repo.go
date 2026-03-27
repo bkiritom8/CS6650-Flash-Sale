@@ -14,7 +14,7 @@ import (
 )
 
 type DynamoDBRepo struct {
-	client     *dynamodb.Client
+	client      *dynamodb.Client
 	eventsTable string
 	seatsTable  string
 }
@@ -265,6 +265,47 @@ func (r *DynamoDBRepo) itemToSeat(item map[string]types.AttributeValue) Seat {
 		Status:    item["status"].(*types.AttributeValueMemberS).Value,
 		CreatedAt: createdAt,
 	}
+}
+
+func (r *DynamoDBRepo) ResetInventory(ctx context.Context) error {
+	// Scan and delete all items from seats table (DynamoDB doesn't support truncate, so we scan and delete)
+	var lastEvaluatedKey map[string]types.AttributeValue
+	input := &dynamodb.ScanInput{
+		TableName:         aws.String(r.seatsTable),
+		ExclusiveStartKey: lastEvaluatedKey,
+	}
+	for {
+		out, err := r.client.Scan(ctx, input)
+		if err != nil {
+			return fmt.Errorf("deleting seat: %w", err)
+		}
+		lastEvaluatedKey = out.LastEvaluatedKey
+
+		if lastEvaluatedKey == nil {
+			break
+		}
+
+	}
+
+	// Scan and delete all items from events table
+	lastEvaluatedKey = nil
+	input = &dynamodb.ScanInput{
+		TableName:         aws.String(r.eventsTable),
+		ExclusiveStartKey: lastEvaluatedKey,
+	}
+	for {
+		out, err := r.client.Scan(ctx, input)
+		if err != nil {
+			return fmt.Errorf("deleting event: %w", err)
+		}
+		lastEvaluatedKey = out.LastEvaluatedKey
+
+		if lastEvaluatedKey == nil {
+			break
+		}
+
+	}
+	return r.SeedData(ctx)
 }
 
 func (r *DynamoDBRepo) Close() error { return nil }

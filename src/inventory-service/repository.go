@@ -20,5 +20,8 @@ type Repository interface {
 	// Seed — called once at startup
 	SeedData(ctx context.Context) error
 
+	// Cleanup method for testing — drops all data and recreates tables.
+	ResetInventory(ctx context.Context) error
+
 	Close() error
 }

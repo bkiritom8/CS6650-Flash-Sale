@@ -92,8 +92,8 @@ func (r *DynamoDBRepo) CancelBooking(ctx context.Context, bookingID string) erro
 		Key: map[string]types.AttributeValue{
 			"booking_id": &types.AttributeValueMemberS{Value: bookingID},
 		},
-		UpdateExpression: aws.String("SET #s = :cancelled"),
-		ExpressionAttributeNames:  map[string]string{"#s": "status"},
+		UpdateExpression:         aws.String("SET #s = :cancelled"),
+		ExpressionAttributeNames: map[string]string{"#s": "status"},
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":cancelled": &types.AttributeValueMemberS{Value: "cancelled"},
 		},
@@ -170,7 +170,7 @@ func (r *DynamoDBRepo) CheckAndReserveOptimistic(ctx context.Context, eventID, s
 		if out.Item == nil {
 			// Initialise seat version record
 			_, err = r.client.PutItem(ctx, &dynamodb.PutItemInput{
-				TableName:           aws.String(r.versionsTable),
+				TableName: aws.String(r.versionsTable),
 				Item: map[string]types.AttributeValue{
 					"event_id": &types.AttributeValueMemberS{Value: eventID},
 					"seat_id":  &types.AttributeValueMemberS{Value: seatID},
@@ -194,10 +194,10 @@ func (r *DynamoDBRepo) CheckAndReserveOptimistic(ctx context.Context, eventID, s
 
 		// Conditional update — only succeeds if version still matches
 		_, err = r.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
-			TableName: aws.String(r.versionsTable),
-			Key:       vk,
-			UpdateExpression:    aws.String("SET #s = :reserved, version = :newv"),
-			ConditionExpression: aws.String("version = :oldv AND #s = :available"),
+			TableName:                aws.String(r.versionsTable),
+			Key:                      vk,
+			UpdateExpression:         aws.String("SET #s = :reserved, version = :newv"),
+			ConditionExpression:      aws.String("version = :oldv AND #s = :available"),
 			ExpressionAttributeNames: map[string]string{"#s": "status"},
 			ExpressionAttributeValues: map[string]types.AttributeValue{
 				":reserved":  &types.AttributeValueMemberS{Value: "reserved"},
@@ -271,9 +271,9 @@ func (r *DynamoDBRepo) CheckAndReservePessimistic(ctx context.Context, eventID, 
 		finalStatus = "available"
 	}
 	_, _ = r.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
-		TableName: aws.String(r.versionsTable),
-		Key:       vk,
-		UpdateExpression: aws.String("SET #s = :status, in_progress = :f"),
+		TableName:                aws.String(r.versionsTable),
+		Key:                      vk,
+		UpdateExpression:         aws.String("SET #s = :status, in_progress = :f"),
 		ExpressionAttributeNames: map[string]string{"#s": "status"},
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":status": &types.AttributeValueMemberS{Value: finalStatus},
@@ -319,6 +319,66 @@ func (r *DynamoDBRepo) itemToBooking(item map[string]types.AttributeValue) *Book
 		LockMode:   item["lock_mode"].(*types.AttributeValueMemberS).Value,
 		CreatedAt:  t,
 	}
+}
+
+func (r *DynamoDBRepo) ResetBookings(ctx context.Context) error {
+	// Scan and delete all items in bookings table (DynamoDB has no truncate)
+	var lastEvaluatedKey map[string]types.AttributeValue
+	input := &dynamodb.ScanInput{
+		TableName:         aws.String(r.bookingsTable),
+		ExclusiveStartKey: lastEvaluatedKey,
+	}
+	for {
+		out, err := r.client.Scan(ctx, input)
+		if err != nil {
+			return fmt.Errorf("deleting booking: %w", err)
+		}
+		lastEvaluatedKey = out.LastEvaluatedKey
+
+		if lastEvaluatedKey == nil {
+			break
+		}
+
+	}
+
+	// Similarly clear versions and oversells tables
+	lastEvaluatedKey = nil
+	input = &dynamodb.ScanInput{
+		TableName:         aws.String(r.oversellsTable),
+		ExclusiveStartKey: lastEvaluatedKey,
+	}
+	for {
+		out, err := r.client.Scan(ctx, input)
+		if err != nil {
+			return fmt.Errorf("deleting oversell: %w", err)
+		}
+		lastEvaluatedKey = out.LastEvaluatedKey
+
+		if lastEvaluatedKey == nil {
+			break
+		}
+
+	}
+
+	lastEvaluatedKey = nil
+	input = &dynamodb.ScanInput{
+		TableName:         aws.String(r.versionsTable),
+		ExclusiveStartKey: lastEvaluatedKey,
+	}
+	for {
+		out, err := r.client.Scan(ctx, input)
+		if err != nil {
+			return fmt.Errorf("deleting version: %w", err)
+		}
+		lastEvaluatedKey = out.LastEvaluatedKey
+
+		if lastEvaluatedKey == nil {
+			break
+		}
+
+	}
+
+	return nil
 }
 
 func (r *DynamoDBRepo) Close() error { return nil }

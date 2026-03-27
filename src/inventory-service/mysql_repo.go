@@ -7,8 +7,8 @@ import (
 	"log"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
 	"github.com/go-sql-driver/mysql"
+	_ "github.com/go-sql-driver/mysql"
 )
 
 type MySQLRepo struct {
@@ -227,6 +227,24 @@ func (r *MySQLRepo) ReleaseSeat(ctx context.Context, eventID, seatID string) err
 		return err
 	}
 	return tx.Commit()
+}
+
+func (r *MySQLRepo) ResetInventory(ctx context.Context) error {
+	// For testing purposes - delete all seats and events and re-seed
+	stmts := []string{
+		`DROP TABLE IF EXISTS seats`,
+		`DROP TABLE IF EXISTS events`,
+	}
+	for _, s := range stmts {
+		if _, err := r.db.Exec(s); err != nil {
+			return err
+		}
+	}
+	err := r.migrate()
+	if err != nil {
+		return err
+	}
+	return r.SeedData(ctx)
 }
 
 func (r *MySQLRepo) Close() error {

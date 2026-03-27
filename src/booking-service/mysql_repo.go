@@ -7,8 +7,8 @@ import (
 	"log"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
 	"github.com/go-sql-driver/mysql"
+	_ "github.com/go-sql-driver/mysql"
 )
 
 type MySQLRepo struct {
@@ -306,6 +306,22 @@ func (r *MySQLRepo) CountOversells(ctx context.Context, eventID string) (int, er
 		`SELECT COUNT(*) FROM oversell_events WHERE event_id=?`, eventID,
 	).Scan(&count)
 	return count, err
+}
+
+// ── Cleanup ───────────────────────────────────────────────────────────────────
+
+func (r *MySQLRepo) ResetBookings(ctx context.Context) error {
+	stmts := []string{
+		`DROP TABLE IF EXISTS bookings`,
+		`DROP TABLE IF EXISTS oversell_events`,
+		`DROP TABLE IF EXISTS seat_versions`,
+	}
+	for _, s := range stmts {
+		if _, err := r.db.ExecContext(ctx, s); err != nil {
+			return err
+		}
+	}
+	return r.migrate()
 }
 
 func (r *MySQLRepo) Close() error { return r.db.Close() }
