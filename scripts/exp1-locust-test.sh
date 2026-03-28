@@ -42,7 +42,7 @@ ok()   { echo "  [PASS] $1"; PASS=$((PASS+1)); }
 fail() { echo "  [FAIL] $1"; FAIL=$((FAIL+1)); }
 
 # ── Results table storage ──────────────────────────────────────────────────────
-declare -a RES_BACKEND RES_MODE RES_BOOKINGS RES_OVERSELLS \
+declare -a RES_BACKEND RES_MODE RES_BOOKINGS RES_OVERSELLS RES_FAILED RES_LEGIT \
            RES_AVG RES_P50 RES_P95 RES_P99 RES_STATUS
 
 # ── parse_latency <csv_prefix> — sets LAT_AVG LAT_P50 LAT_P95 LAT_P99 ─────────
@@ -148,8 +148,14 @@ run_mode() {
             ;;
     esac
 
+    # failed = users that never wrote a booking (connection errors, timeouts)
+    # legitimate = bookings that were not oversells (should be 1 for opt/pess, ~1 for none)
+    local failed=$(( CONCURRENCY - bookings ))
+    local legitimate=$(( bookings - oversells ))
+
     RES_BACKEND+=("${backend}"); RES_MODE+=("${mode}")
     RES_BOOKINGS+=("${bookings}"); RES_OVERSELLS+=("${oversells}")
+    RES_FAILED+=("${failed}"); RES_LEGIT+=("${legitimate}")
     RES_AVG+=("${LAT_AVG}"); RES_P50+=("${LAT_P50}")
     RES_P95+=("${LAT_P95}"); RES_P99+=("${LAT_P99}")
     RES_STATUS+=("${status}")
@@ -190,14 +196,15 @@ echo ""
 echo "=============================================================="
 echo "  RESULTS SUMMARY  (${CONCURRENCY} users · waiting-room spawn)"
 echo "=============================================================="
-printf "  %-10s %-14s %9s %10s %8s %7s %7s %7s  %s\n" \
-    "Backend" "Lock Mode" "Bookings" "Oversells" "Avg(ms)" "p50" "p95" "p99" "Status"
-printf "  %-10s %-14s %9s %10s %8s %7s %7s %7s  %s\n" \
-    "--------" "----------" "--------" "---------" "-------" "---" "---" "---" "------"
+printf "  %-10s %-14s %9s %10s %8s %7s %8s %7s %7s %7s  %s\n" \
+    "Backend" "Lock Mode" "Bookings" "Oversells" "Legit" "Failed" "Avg(ms)" "p50" "p95" "p99" "Status"
+printf "  %-10s %-14s %9s %10s %8s %7s %8s %7s %7s %7s  %s\n" \
+    "--------" "----------" "--------" "---------" "-----" "------" "-------" "---" "---" "---" "------"
+echo "  (Bookings = Legit + Oversells  |  Legit + Oversells + Failed = ${CONCURRENCY} users)"
 for i in "${!RES_MODE[@]}"; do
-    printf "  %-10s %-14s %9s %10s %8s %7s %7s %7s  %s\n" \
+    printf "  %-10s %-14s %9s %10s %8s %7s %8s %7s %7s %7s  %s\n" \
         "${RES_BACKEND[$i]}" "${RES_MODE[$i]}" \
-        "${RES_BOOKINGS[$i]}" "${RES_OVERSELLS[$i]}" \
+        "${RES_BOOKINGS[$i]}" "${RES_OVERSELLS[$i]}" "${RES_LEGIT[$i]}" "${RES_FAILED[$i]}" \
         "${RES_AVG[$i]}" "${RES_P50[$i]}" "${RES_P95[$i]}" "${RES_P99[$i]}" \
         "${RES_STATUS[$i]}"
 done
@@ -218,11 +225,11 @@ mkdir -p "${RESULTS_DIR}"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 OUT_CSV="${RESULTS_DIR}/exp1_${TIMESTAMP}.csv"
 
-printf "backend,lock_mode,concurrency,bookings,oversells,avg_ms,p50_ms,p95_ms,p99_ms,status\n" > "${OUT_CSV}"
+printf "backend,lock_mode,concurrency,bookings,oversells,legitimate,failed,avg_ms,p50_ms,p95_ms,p99_ms,status\n" > "${OUT_CSV}"
 for i in "${!RES_MODE[@]}"; do
-    printf "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n" \
+    printf "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n" \
         "${RES_BACKEND[$i]}" "${RES_MODE[$i]}" "${CONCURRENCY}" \
-        "${RES_BOOKINGS[$i]}" "${RES_OVERSELLS[$i]}" \
+        "${RES_BOOKINGS[$i]}" "${RES_OVERSELLS[$i]}" "${RES_LEGIT[$i]}" "${RES_FAILED[$i]}" \
         "${RES_AVG[$i]}" "${RES_P50[$i]}" "${RES_P95[$i]}" "${RES_P99[$i]}" \
         "${RES_STATUS[$i]}" >> "${OUT_CSV}"
 done

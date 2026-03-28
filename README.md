@@ -130,14 +130,21 @@ Results are saved to `results/exp1_<timestamp>.csv` after each run.
 
 **Expected results (1000 users):**
 
-| Backend | Lock Mode | Bookings | Oversells | Notes |
-|---|---|---|---|---|
-| MySQL | none | ~630 | ~630 | Baseline — race window causes oversells |
-| MySQL | optimistic | 1 | 0 | CAS retry on version column |
-| MySQL | pessimistic | 1 | 0 | `SELECT ... FOR UPDATE` |
-| DynamoDB | none | ~1000 | ~999 | Baseline |
-| DynamoDB | optimistic | 1 | 0 | Conditional UpdateItem on version |
-| DynamoDB | pessimistic | 1 | 0 | Conditional write with in-progress fence |
+| Backend | Lock Mode | Bookings | Oversells | Legitimate | Failed | Notes |
+|---|---|---|---|---|---|---|
+| MySQL | none | ~630 | ~629 | 1 | ~370 | Race window — seat sold 630 times |
+| MySQL | optimistic | 1 | 0 | 1 | 999 | CAS retry on version column |
+| MySQL | pessimistic | 1 | 0 | 1 | 999 | `SELECT ... FOR UPDATE` |
+| DynamoDB | none | ~1000 | ~999 | 1 | ~0 | Race window — nearly all requests reach DB |
+| DynamoDB | optimistic | 1 | 0 | 1 | 999 | Conditional UpdateItem on version |
+| DynamoDB | pessimistic | 1 | 0 | 1 | 999 | Conditional write with in-progress fence |
+
+**How to read these columns:**
+- **Bookings** — total rows written to the DB (= Legitimate + Oversells)
+- **Oversells** — bookings written after the seat was already taken (should be 0 with locking)
+- **Legitimate** — bookings that were not oversells (always 1 — only one person should get the seat)
+- **Failed** — requests that never reached the DB (connection limits, timeouts)
+- **Bookings + Failed = 1000 users** (Oversells are a subset of Bookings, not a separate count)
 
 > **Note on concurrency:** Keep `CONCURRENCY` at or below 5,000 — the Fargate task is 512 CPU / 1 GB RAM and will OOM above that.
 
