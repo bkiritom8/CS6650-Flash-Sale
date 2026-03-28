@@ -17,6 +17,10 @@ src/*/queue-service
 src/experiment1/experiment1
 experiments/experiment1/experiment1
 
+# Python
+__pycache__/
+*.pyc
+
 # Node
 node_modules/
 dist/

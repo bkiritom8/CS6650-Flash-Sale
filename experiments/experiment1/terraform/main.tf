@@ -147,15 +147,7 @@ resource "aws_ecs_task_definition" "experiment1" {
     }]
 
     environment = [
-      { name = "AWS_REGION",               value = var.aws_region },
-      { name = "MYSQL_HOST",               value = data.aws_db_instance.mysql.address },
-      { name = "MYSQL_PORT",               value = tostring(data.aws_db_instance.mysql.port) },
-      { name = "MYSQL_DB",                 value = data.aws_db_instance.mysql.db_name },
-      { name = "MYSQL_USER",               value = "admin" },
-      { name = "MYSQL_PASSWORD",           value = var.db_password },
-      { name = "DYNAMODB_BOOKINGS_TABLE",  value = data.aws_dynamodb_table.bookings.name },
-      { name = "DYNAMODB_VERSIONS_TABLE",  value = data.aws_dynamodb_table.versions.name },
-      { name = "DYNAMODB_OVERSELLS_TABLE", value = data.aws_dynamodb_table.oversells.name },
+      { name = "BOOKING_SERVICE_URL", value = "http://${data.aws_lb.main.dns_name}/booking" },
     ]
 
     logConfiguration = {

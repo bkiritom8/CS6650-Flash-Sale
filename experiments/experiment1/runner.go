@@ -1,39 +1,37 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"math"
+	"net/http"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 )
 
-// Runner executes one experiment run against a Repository.
-// It spawns `concurrency` goroutines simultaneously (via a shared start channel)
-// so all writers hit the DB at the same instant, maximising contention.
+// Runner calls the booking-service HTTP API.
+// All locking logic lives in the booking service — experiment1 just drives it.
 type Runner struct {
-	mysqlRepo  Repository
-	dynamoRepo Repository
+	bookingURL string
+	client     *http.Client
 }
 
-func NewRunner(mysqlRepo, dynamoRepo Repository) *Runner {
+func NewRunner(bookingURL string) *Runner {
 	return &Runner{
-		mysqlRepo:  mysqlRepo,
-		dynamoRepo: dynamoRepo,
+		bookingURL: bookingURL,
+		client:     &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
-// Run executes the experiment and returns the full result.
+// Run spawns concurrency goroutines that simultaneously POST to the booking service,
+// maximising write contention — same as the Locust waiting-room pattern.
 func (r *Runner) Run(ctx context.Context, req RunRequest) (*ExperimentResult, error) {
-	repo, err := r.repoFor(req.DBBackend)
-	if err != nil {
-		return nil, err
-	}
-
 	concurrency := req.Concurrency
 	if concurrency <= 0 {
 		concurrency = 1000
@@ -44,15 +42,8 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (*ExperimentResult, er
 	}
 
 	runID := uuid.New().String()
-	// Unique event_id per run — prevents cross-run interference in the DB.
 	eventID := fmt.Sprintf("exp1-%s", runID[:8])
 	seatID := "seat-last"
-
-	if err := repo.InitSeat(ctx, eventID, seatID); err != nil {
-		return nil, fmt.Errorf("init seat: %w", err)
-	}
-	// Best-effort cleanup after the run regardless of outcome.
-	defer repo.Cleanup(ctx, eventID, seatID)
 
 	type outcome struct {
 		latencyMS float64
@@ -60,51 +51,32 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (*ExperimentResult, er
 	}
 
 	results := make(chan outcome, concurrency)
-	start := make(chan struct{}) // closed simultaneously to release all goroutines at once
-
-	bookingIDs := make([]string, concurrency)
-	for i := range bookingIDs {
-		bookingIDs[i] = uuid.New().String()
-	}
+	start := make(chan struct{})
 
 	var wg sync.WaitGroup
 	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
-		bID := bookingIDs[i]
-		go func(bookingID string) {
+		go func() {
 			defer wg.Done()
-			<-start // block until all goroutines are ready
+			<-start // wait until all goroutines are ready, then rush together
 
 			t0 := time.Now()
-			var callErr error
-
-			switch req.LockMode {
-			case LockNone:
-				_, callErr = repo.BookNoLock(ctx, eventID, seatID, bookingID)
-			case LockOptimistic:
-				callErr = repo.BookOptimistic(ctx, eventID, seatID, bookingID, maxRetries)
-			case LockPessimistic:
-				callErr = repo.BookPessimistic(ctx, eventID, seatID, bookingID)
-			}
-
+			err := r.postBooking(ctx, eventID, seatID, req.LockMode, req.DBBackend, maxRetries)
 			results <- outcome{
 				latencyMS: float64(time.Since(t0).Microseconds()) / 1000.0,
-				success:   callErr == nil,
+				success:   err == nil,
 			}
-		}(bID)
+		}()
 	}
 
 	startedAt := time.Now()
-	close(start) // fire — all goroutines unblock simultaneously
+	close(start)
 	wg.Wait()
 	completedAt := time.Now()
 	close(results)
 
-	// ── Aggregate outcomes ───────────────────────────────────────────────────
 	var latencies []float64
-	successCount := 0
-	failCount := 0
-
+	successCount, failCount := 0, 0
 	for o := range results {
 		latencies = append(latencies, o.latencyMS)
 		if o.success {
@@ -114,19 +86,16 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (*ExperimentResult, er
 		}
 	}
 
-	// ── Query DB for ground-truth oversell count ─────────────────────────────
-	// Use a fresh context so connection pressure from the run doesn't cause
-	// this metrics query to silently fail (error is discarded below).
-	metricsCtx, metricsCancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer metricsCancel()
-	oversellCount, _ := repo.CountOversells(metricsCtx, eventID, seatID)
+	metricsCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	bookings, oversells, _ := r.GetResults(metricsCtx, req.DBBackend, eventID, seatID)
 
-	// ── Compute latency stats ────────────────────────────────────────────────
+	defer r.CleanupSeat(context.Background(), req.DBBackend, eventID, seatID)
+
 	stats := computeLatency(latencies)
-
 	oversellRate := 0.0
 	if concurrency > 0 {
-		oversellRate = math.Round(float64(oversellCount)/float64(concurrency)*10000) / 100
+		oversellRate = math.Round(float64(oversells)/float64(concurrency)*10000) / 100
 	}
 
 	return &ExperimentResult{
@@ -134,9 +103,9 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (*ExperimentResult, er
 		DBBackend:          req.DBBackend,
 		LockMode:           req.LockMode,
 		Concurrency:        concurrency,
-		SuccessfulBookings: successCount,
+		SuccessfulBookings: bookings,
 		FailedBookings:     failCount,
-		OversellCount:      oversellCount,
+		OversellCount:      oversells,
 		OversellRatePct:    oversellRate,
 		TotalDurationMS:    float64(completedAt.Sub(startedAt).Milliseconds()),
 		Latency:            stats,
@@ -145,111 +114,130 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (*ExperimentResult, er
 	}, nil
 }
 
-// ── Single-operation methods (used by Locust-facing HTTP endpoints) ───────────
-
-func (r *Runner) InitSeat(ctx context.Context, dbBackend DBBackend, eventID, seatID string) error {
-	repo, err := r.repoFor(dbBackend)
-	if err != nil {
-		return err
-	}
-	return repo.InitSeat(ctx, eventID, seatID)
+// InitSeat is a no-op: the booking service auto-creates the seat_versions row on first
+// write, and each run uses a fresh event_id so there is no prior state to reset.
+func (r *Runner) InitSeat(_ context.Context, _ DBBackend, _, _ string) error {
+	return nil
 }
 
 // BookSingle processes one booking attempt from a Locust worker.
-// got=true means this worker won the seat.
-// got=false, err=nil means the seat was taken (expected for most workers).
-// err!=nil means an actual infrastructure error.
 func (r *Runner) BookSingle(ctx context.Context, req BookSeatRequest) (got bool, err error) {
-	repo, err := r.repoFor(req.DBBackend)
-	if err != nil {
-		return false, err
-	}
 	maxRetries := req.MaxRetries
 	if maxRetries <= 0 {
 		maxRetries = 3
 	}
-	switch req.LockMode {
-	case LockNone:
-		_, err = repo.BookNoLock(ctx, req.EventID, req.SeatID, req.BookingID)
-		return err == nil, err
-	case LockOptimistic:
-		err = repo.BookOptimistic(ctx, req.EventID, req.SeatID, req.BookingID, maxRetries)
-		if isSeatUnavailable(err) {
-			return false, nil
+	err = r.postBooking(ctx, req.EventID, req.SeatID, req.LockMode, req.DBBackend, maxRetries)
+	if err != nil {
+		if err.Error() == "seat not available" {
+			return false, nil // 409 — expected for all but one winner
 		}
-		return err == nil, err
-	case LockPessimistic:
-		err = repo.BookPessimistic(ctx, req.EventID, req.SeatID, req.BookingID)
-		if isSeatUnavailable(err) {
-			return false, nil
-		}
-		return err == nil, err
+		return false, err
 	}
-	return false, fmt.Errorf("unknown lock_mode %q", req.LockMode)
+	return true, nil
 }
 
+// GetResults fetches booking and oversell counts from the booking service.
 func (r *Runner) GetResults(ctx context.Context, dbBackend DBBackend, eventID, seatID string) (bookings, oversells int, err error) {
-	repo, err := r.repoFor(dbBackend)
+	// Count confirmed bookings for this seat
+	url := fmt.Sprintf("%s/api/v1/events/%s/bookings?db_backend=%s", r.bookingURL, eventID, dbBackend)
+	resp, err := r.client.Get(url)
 	if err != nil {
-		return
+		return 0, 0, err
 	}
-	bookings, err = repo.CountBookings(ctx, eventID, seatID)
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	var listResp struct {
+		Bookings []struct {
+			SeatID string `json:"seat_id"`
+			Status string `json:"status"`
+		} `json:"bookings"`
+	}
+	if json.Unmarshal(body, &listResp) == nil {
+		for _, b := range listResp.Bookings {
+			if b.SeatID == seatID && b.Status == "confirmed" {
+				bookings++
+			}
+		}
+	}
+
+	// Get oversell count from metrics endpoint
+	mURL := fmt.Sprintf("%s/api/v1/metrics?event_id=%s&db_backend=%s", r.bookingURL, eventID, dbBackend)
+	resp2, err := r.client.Get(mURL)
 	if err != nil {
-		return
+		return bookings, 0, nil
 	}
-	oversells, err = repo.CountOversells(ctx, eventID, seatID)
-	return
+	defer resp2.Body.Close()
+	body2, _ := io.ReadAll(resp2.Body)
+	var mResp struct {
+		OversellCount int `json:"oversell_count"`
+	}
+	json.Unmarshal(body2, &mResp)
+	return bookings, mResp.OversellCount, nil
 }
 
-func (r *Runner) CleanupSeat(ctx context.Context, dbBackend DBBackend, eventID, seatID string) error {
-	repo, err := r.repoFor(dbBackend)
+// CleanupSeat removes all bookings for the test event via the booking service.
+func (r *Runner) CleanupSeat(ctx context.Context, dbBackend DBBackend, eventID, _ string) error {
+	req, _ := http.NewRequestWithContext(ctx, http.MethodDelete,
+		fmt.Sprintf("%s/api/v1/internal/events/%s/data?db_backend=%s", r.bookingURL, eventID, dbBackend),
+		nil)
+	resp, err := r.client.Do(req)
 	if err != nil {
 		return err
 	}
-	return repo.Cleanup(ctx, eventID, seatID)
+	resp.Body.Close()
+	return nil
 }
 
-func isSeatUnavailable(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "seat not available")
-}
+// postBooking calls POST /booking/api/v1/bookings with per-request lock_mode and db_backend.
+func (r *Runner) postBooking(ctx context.Context, eventID, seatID string, lockMode LockMode, dbBackend DBBackend, maxRetries int) error {
+	payload, _ := json.Marshal(map[string]interface{}{
+		"event_id":    eventID,
+		"seat_id":     seatID,
+		"customer_id": 1,
+		"lock_mode":   string(lockMode),
+		"db_backend":  string(dbBackend),
+		"max_retries": maxRetries,
+	})
 
-// ─────────────────────────────────────────────────────────────────────────────
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		fmt.Sprintf("%s/api/v1/bookings", r.bookingURL),
+		bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
 
-func (r *Runner) repoFor(backend DBBackend) (Repository, error) {
-	switch backend {
-	case BackendMySQL:
-		if r.mysqlRepo == nil {
-			return nil, fmt.Errorf("MySQL backend not configured")
-		}
-		return r.mysqlRepo, nil
-	case BackendDynamoDB:
-		if r.dynamoRepo == nil {
-			return nil, fmt.Errorf("DynamoDB backend not configured")
-		}
-		return r.dynamoRepo, nil
+	resp, err := r.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+
+	switch resp.StatusCode {
+	case http.StatusCreated:
+		return nil
+	case http.StatusConflict:
+		return fmt.Errorf("seat not available")
 	default:
-		return nil, fmt.Errorf("unknown db_backend %q, must be 'mysql' or 'dynamodb'", backend)
+		return fmt.Errorf("booking service returned %d", resp.StatusCode)
 	}
 }
 
-// computeLatency returns min/max/mean/p99 from a slice of millisecond values.
 func computeLatency(latencies []float64) LatencyStats {
 	if len(latencies) == 0 {
 		return LatencyStats{}
 	}
-
 	sort.Float64s(latencies)
-
 	sum := 0.0
 	for _, v := range latencies {
 		sum += v
 	}
-
 	p99idx := int(math.Ceil(float64(len(latencies))*0.99)) - 1
 	if p99idx < 0 {
 		p99idx = 0
 	}
-
 	return LatencyStats{
 		MinMS:  round2(latencies[0]),
 		MaxMS:  round2(latencies[len(latencies)-1]),
