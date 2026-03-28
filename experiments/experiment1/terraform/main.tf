@@ -155,6 +155,8 @@ resource "aws_ecs_task_definition" "experiment1" {
       { name = "DYNAMODB_BOOKINGS_TABLE",  value = data.aws_dynamodb_table.bookings.name },
       { name = "DYNAMODB_VERSIONS_TABLE",  value = data.aws_dynamodb_table.versions.name },
       { name = "DYNAMODB_OVERSELLS_TABLE", value = data.aws_dynamodb_table.oversells.name },
+      { name = "MONGODB_URI", value = "mongodb://${aws_instance.mongodb.private_ip}:27017/?directConnection=true" },
+      { name = "MONGODB_DB",  value = "concertdb" },
     ]
 
     logConfiguration = {
@@ -198,5 +200,63 @@ resource "aws_ecs_service" "experiment1" {
   # Force a fresh deployment whenever the task definition changes.
   force_new_deployment = true
 
-  depends_on = [aws_lb_listener_rule.experiment1]
+  depends_on = [aws_lb_listener_rule.experiment1, aws_instance.mongodb]
+}
+
+# ── MongoDB on EC2 ────────────────────────────────────────────────────────────
+# DocumentDB requires rds:CreateDBInstance which is blocked on AWS Academy.
+# Instead, run MongoDB 7 on a t3.small in the same private VPC.
+
+data "aws_ami" "amazon_linux_2" {
+  most_recent = true
+  owners      = ["amazon"]
+  filter {
+    name   = "name"
+    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
+  }
+}
+
+resource "aws_security_group" "mongodb" {
+  name        = "${var.service_name}-exp1-mongodb-sg"
+  description = "Allow MongoDB 27017 from ECS tasks"
+  vpc_id      = data.aws_vpc.main.id
+
+  ingress {
+    from_port       = 27017
+    to_port         = 27017
+    protocol        = "tcp"
+    security_groups = [data.aws_security_group.ecs.id]
+  }
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  tags = { Name = "${var.service_name}-exp1-mongodb-sg" }
+}
+
+resource "aws_instance" "mongodb" {
+  ami                    = data.aws_ami.amazon_linux_2.id
+  instance_type          = "t3.small"
+  subnet_id              = tolist(data.aws_subnets.private.ids)[0]
+  vpc_security_group_ids = [aws_security_group.mongodb.id]
+
+  user_data = <<-EOF
+    #!/bin/bash
+    cat > /etc/yum.repos.d/mongodb-org-7.0.repo << 'REPO'
+    [mongodb-org-7.0]
+    name=MongoDB Repository
+    baseurl=https://repo.mongodb.org/yum/amazon/2/mongodb-org/7.0/x86_64/
+    gpgcheck=1
+    enabled=1
+    gpgkey=https://www.mongodb.org/static/pgp/server-7.0.asc
+    REPO
+    yum install -y mongodb-org
+    sed -i 's/bindIp: 127.0.0.1/bindIp: 0.0.0.0/' /etc/mongod.conf
+    systemctl enable mongod
+    systemctl start mongod
+  EOF
+
+  tags = { Name = "${var.service_name}-exp1-mongodb" }
 }

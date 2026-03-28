@@ -17,3 +17,7 @@ output "ecs_service_name" {
 output "log_group_name" {
   value = aws_cloudwatch_log_group.experiment1.name
 }
+
+output "mongodb_private_ip" {
+  value = aws_instance.mongodb.private_ip
+}

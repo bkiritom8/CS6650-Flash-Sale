@@ -18,12 +18,14 @@ import (
 type Runner struct {
 	mysqlRepo    Repository
 	dynamoRepo   Repository
+	mongoRepo    Repository
 }
 
-func NewRunner(mysqlRepo, dynamoRepo Repository) *Runner {
+func NewRunner(mysqlRepo, dynamoRepo, mongoRepo Repository) *Runner {
 	return &Runner{
 		mysqlRepo:  mysqlRepo,
 		dynamoRepo: dynamoRepo,
+		mongoRepo:  mongoRepo,
 	}
 }
 
@@ -227,8 +229,13 @@ func (r *Runner) repoFor(backend DBBackend) (Repository, error) {
 			return nil, fmt.Errorf("DynamoDB backend not configured")
 		}
 		return r.dynamoRepo, nil
+	case BackendMongoDB:
+		if r.mongoRepo == nil {
+			return nil, fmt.Errorf("MongoDB backend not configured")
+		}
+		return r.mongoRepo, nil
 	default:
-		return nil, fmt.Errorf("unknown db_backend %q, must be 'mysql' or 'dynamodb'", backend)
+		return nil, fmt.Errorf("unknown db_backend %q, must be 'mysql', 'dynamodb', or 'mongodb'", backend)
 	}
 }
 
