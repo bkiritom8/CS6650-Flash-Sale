@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LOCUST_FILE="${REPO_ROOT}/locust/experiment1/experiment1.py"
+LOCUST_FILE="${REPO_ROOT}/experiments/experiment1/experiment1.py"
 EXP_TF="${REPO_ROOT}/experiments/experiment1/terraform"
 
 # ── Tunable parameters ─────────────────────────────────────────────────────────
@@ -24,7 +24,7 @@ elif command -v python  &>/dev/null; then PY="python"
 else echo "ERROR: Python not found."; exit 1; fi
 
 if ! command -v locust &>/dev/null; then
-    echo "ERROR: locust not found.  Run: pip install -r locust/experiment1/requirements.txt"
+    echo "ERROR: locust not found.  Run: pip install -r experiments/experiment1/requirements.txt"
     exit 1
 fi
 

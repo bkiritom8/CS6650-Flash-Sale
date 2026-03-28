@@ -22,16 +22,7 @@ CS6650-Flash-Sale/
 │   └── queue-service/         # Virtual waiting room
 ├── experiments/
 │   └── experiment1/           # Exp 1: locking strategy benchmarks
-│       ├── main.go            # HTTP harness — calls booking-service API
-│       ├── runner.go          # Spawns goroutines, drives booking-service endpoints
-│       ├── handler.go
-│       ├── models.go
-│       ├── Dockerfile
-│       ├── go.mod
-│       └── terraform/         # Self-contained infra (ECR, ECS, ALB rule)
-├── locust/
-│   └── experiment1/           # Locust load test (waiting-room pattern)
-│       ├── experiment1.py
+│       ├── experiment1.py     # Locust load test (waiting-room pattern)
 │       └── requirements.txt
 ├── terraform/
 │   ├── main/                  # Root platform config — run all Terraform from here
