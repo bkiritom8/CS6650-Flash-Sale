@@ -30,6 +30,11 @@ type CreateBookingRequest struct {
 	EventID    string `json:"event_id"    binding:"required"`
 	SeatID     string `json:"seat_id"     binding:"required"`
 	CustomerID int    `json:"customer_id" binding:"required"`
+	// Per-request overrides — used by experiment1 to test all combinations
+	// without redeploying. Falls back to service-level config if omitted.
+	LockMode   string `json:"lock_mode,omitempty"`
+	DBBackend  string `json:"db_backend,omitempty"`
+	MaxRetries int    `json:"max_retries,omitempty"`
 }
 
 type BookingResponse struct {

@@ -12,24 +12,27 @@ import (
 )
 
 type Handler struct {
-	repo           Repository
+	mysqlRepo      Repository
+	dynamoRepo     Repository
+	defaultBackend string
 	lockMode       LockMode
 	inventoryURL   string
 	bookingsPerSec atomic.Int64
 	httpClient     *http.Client
 }
 
-func NewHandler(repo Repository, lockMode LockMode, inventoryURL string) *Handler {
+func NewHandler(mysqlRepo, dynamoRepo Repository, defaultBackend string, lockMode LockMode, inventoryURL string) *Handler {
 	return &Handler{
-		repo:         repo,
-		lockMode:     lockMode,
-		inventoryURL: inventoryURL,
-		httpClient:   &http.Client{Timeout: 5 * time.Second},
+		mysqlRepo:      mysqlRepo,
+		dynamoRepo:     dynamoRepo,
+		defaultBackend: defaultBackend,
+		lockMode:       lockMode,
+		inventoryURL:   inventoryURL,
+		httpClient:     &http.Client{Timeout: 5 * time.Second},
 	}
 }
 
 func (h *Handler) RegisterRoutes(r *gin.Engine) {
-	// Health check — both bare and ALB-prefixed
 	r.GET("/health", h.Health)
 	r.GET("/booking/health", h.Health)
 
@@ -42,6 +45,11 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 		g.GET("/metrics", h.GetMetrics)
 		// For testing/demo purposes, an endpoint to reset all booking data (also calls inventory reset to keep in sync)
 		g.POST("/reset", h.resetBookings)
+
+		internal := g.Group("/internal")
+		internal.POST("/events/:event_id/seats/:seat_id/reserve", h.ReserveSeat)
+		internal.POST("/events/:event_id/seats/:seat_id/release", h.ReleaseSeat)
+		internal.DELETE("/events/:event_id/data", h.CleanupEventData)
 	}
 }
 
@@ -60,44 +68,64 @@ func (h *Handler) CreateBooking(c *gin.Context) {
 		return
 	}
 
+	repo, err := h.repoFor(req.DBBackend)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{"INVALID_BACKEND", err.Error()})
+		return
+	}
+
+	effectiveLockMode := h.lockMode
+	if req.LockMode != "" {
+		effectiveLockMode = LockMode(req.LockMode)
+	}
+
+	maxRetries := req.MaxRetries
+	if maxRetries <= 0 {
+		maxRetries = 3
+	}
+
 	b := &Booking{
 		BookingID:  uuid.New().String(),
 		EventID:    req.EventID,
 		SeatID:     req.SeatID,
 		CustomerID: req.CustomerID,
 		Status:     "confirmed",
-		LockMode:   string(h.lockMode),
+		LockMode:   string(effectiveLockMode),
 		CreatedAt:  time.Now().UTC(),
 	}
 
-	var err error
-	switch h.lockMode {
+	var bookingErr error
+	switch effectiveLockMode {
 	case LockNone:
-		err = h.repo.CheckAndReserveNoLock(c.Request.Context(), req.EventID, req.SeatID, b)
+		bookingErr = repo.CheckAndReserveNoLock(c.Request.Context(), req.EventID, req.SeatID, b)
 	case LockOptimistic:
-		err = h.repo.CheckAndReserveOptimistic(c.Request.Context(), req.EventID, req.SeatID, b, 3)
+		bookingErr = repo.CheckAndReserveOptimistic(c.Request.Context(), req.EventID, req.SeatID, b, maxRetries)
 	case LockPessimistic:
-		err = h.repo.CheckAndReservePessimistic(c.Request.Context(), req.EventID, req.SeatID, b)
+		bookingErr = repo.CheckAndReservePessimistic(c.Request.Context(), req.EventID, req.SeatID, b)
 	default:
 		c.JSON(http.StatusInternalServerError, ErrorResponse{"CONFIG_ERROR",
-			fmt.Sprintf("unknown lock mode: %s", h.lockMode)})
+			fmt.Sprintf("unknown lock mode: %s", effectiveLockMode)})
 		return
 	}
 
-	if err != nil {
+	if bookingErr != nil {
 		b.Status = "failed"
-		c.JSON(http.StatusConflict, ErrorResponse{"BOOKING_FAILED", err.Error()})
+		c.JSON(http.StatusConflict, ErrorResponse{"BOOKING_FAILED", bookingErr.Error()})
 		return
 	}
 
 	h.bookingsPerSec.Add(1)
 	go h.notifyInventoryReserve(req.EventID, req.SeatID)
-
 	c.JSON(http.StatusCreated, BookingResponse{Booking: b})
 }
 
 func (h *Handler) GetBooking(c *gin.Context) {
-	b, err := h.repo.GetBooking(c.Request.Context(), c.Param("booking_id"))
+	repo, err := h.repoFor("")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{"DB_ERROR", err.Error()})
+		return
+	}
+	b, err := repo.GetBooking(c.Request.Context(), c.Param("booking_id"))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{"DB_ERROR", err.Error()})
 		return
@@ -110,7 +138,12 @@ func (h *Handler) GetBooking(c *gin.Context) {
 }
 
 func (h *Handler) ListBookings(c *gin.Context) {
-	bookings, err := h.repo.ListBookingsByEvent(c.Request.Context(), c.Param("event_id"))
+	repo, err := h.repoFor(c.Query("db_backend"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{"DB_ERROR", err.Error()})
+		return
+	}
+	bookings, err := repo.ListBookingsByEvent(c.Request.Context(), c.Param("event_id"))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{"DB_ERROR", err.Error()})
 		return
@@ -122,7 +155,12 @@ func (h *Handler) ListBookings(c *gin.Context) {
 }
 
 func (h *Handler) CancelBooking(c *gin.Context) {
-	if err := h.repo.CancelBooking(c.Request.Context(), c.Param("booking_id")); err != nil {
+	repo, err := h.repoFor("")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{"DB_ERROR", err.Error()})
+		return
+	}
+	if err := repo.CancelBooking(c.Request.Context(), c.Param("booking_id")); err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{"DB_ERROR", err.Error()})
 		return
 	}
@@ -131,14 +169,54 @@ func (h *Handler) CancelBooking(c *gin.Context) {
 
 func (h *Handler) GetMetrics(c *gin.Context) {
 	eventID := c.Query("event_id")
+	repo, err := h.repoFor(c.Query("db_backend"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{"INVALID_BACKEND", err.Error()})
+		return
+	}
 	oversells := 0
 	if eventID != "" {
-		oversells, _ = h.repo.CountOversells(c.Request.Context(), eventID)
+		oversells, _ = repo.CountOversells(c.Request.Context(), eventID)
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"lock_mode":        string(h.lockMode),
 		"bookings_per_sec": h.bookingsPerSec.Load(),
 		"oversell_count":   oversells,
+	})
+}
+
+// CleanupEventData deletes all test data for an event — used by experiment1 after each run.
+func (h *Handler) CleanupEventData(c *gin.Context) {
+	eventID := c.Param("event_id")
+	repo, err := h.repoFor(c.Query("db_backend"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{"INVALID_BACKEND", err.Error()})
+		return
+	}
+	bookings, err := repo.ListBookingsByEvent(c.Request.Context(), eventID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{"DB_ERROR", err.Error()})
+		return
+	}
+	for _, b := range bookings {
+		_ = repo.CancelBooking(c.Request.Context(), b.BookingID)
+	}
+	c.JSON(http.StatusOK, gin.H{"cleaned": len(bookings)})
+}
+
+func (h *Handler) ReserveSeat(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"event_id": c.Param("event_id"),
+		"seat_id":  c.Param("seat_id"),
+		"status":   "reserved",
+	})
+}
+
+func (h *Handler) ReleaseSeat(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"event_id": c.Param("event_id"),
+		"seat_id":  c.Param("seat_id"),
+		"status":   "available",
 	})
 }
 
@@ -177,4 +255,23 @@ func (h *Handler) resetBookings(c *gin.Context) {
 	}
 	defer resp.Body.Close()
 	c.JSON(http.StatusOK, gin.H{"status": "booking and inventory reset"})
+// repoFor returns the repo for the given backend string (empty = use default).
+func (h *Handler) repoFor(dbBackend string) (Repository, error) {
+	if dbBackend == "" {
+		dbBackend = h.defaultBackend
+	}
+	switch dbBackend {
+	case "mysql":
+		if h.mysqlRepo == nil {
+			return nil, fmt.Errorf("MySQL backend not configured")
+		}
+		return h.mysqlRepo, nil
+	case "dynamodb":
+		if h.dynamoRepo == nil {
+			return nil, fmt.Errorf("DynamoDB backend not configured")
+		}
+		return h.dynamoRepo, nil
+	default:
+		return nil, fmt.Errorf("unknown db_backend %q", dbBackend)
+	}
 }

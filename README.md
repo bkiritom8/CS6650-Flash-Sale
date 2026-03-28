@@ -2,48 +2,54 @@
 
 ## Prerequisites
 
-Install these before anything else:
-
 - Go 1.21+
 - Terraform 1.5+
 - Docker Desktop (must be running)
 - AWS CLI v2, configured with your student account credentials
-- Python 3 (for smoke test parsing)
-- `curl`
+- Python 3 + `locust` (`pip install locust`)
+- `curl`, `jq`
 
 ---
 
 ## Repository Structure
 
 ```
-concert-ticket-platform/
+CS6650-Flash-Sale/
 ├── src/
-│   ├── inventory-service/   # Manages events and seats
-│   ├── booking-service/     # Handles bookings + concurrency control
-│   └── queue-service/       # Virtual waiting room
+│   ├── inventory-service/     # Manages events and seats
+│   ├── booking-service/       # Handles bookings + concurrency control
+│   │                          # Supports per-request lock_mode and db_backend overrides
+│   └── queue-service/         # Virtual waiting room
+├── experiments/
+│   └── experiment1/           # Exp 1: locking strategy benchmarks
+│       ├── experiment1.py     # Locust load test (waiting-room pattern)
+│       └── requirements.txt
 ├── terraform/
-│   ├── main/                # Root config — run all Terraform from here
-│   └── modules/             # alb, autoscaling, dynamodb, ecr, ecs, logging, network, rds
-├── scripts/
-│   ├── deploy.sh            # Full deploy: build images, push to ECR, provision AWS
-│   ├── cleanup.sh           # Tear down all AWS resources
-│   └── test-platform.sh     # Smoke test all endpoints after deploy
-└── INSTRUCTIONS.md
+│   ├── main/                  # Root platform config — run all Terraform from here
+│   └── modules/               # alb, autoscaling, dynamodb, ecr, ecs, logging, network, rds
+├── results/                   # Saved benchmark CSV + PNG results
+│   └── exp1_<timestamp>.csv
+└── scripts/
+    ├── deploy.sh              # Full platform deploy
+    ├── cleanup.sh             # Tear down all platform resources
+    ├── test-platform.sh       # Smoke test all platform endpoints
+    └── exp1-locust-test.sh    # Full Locust benchmark (all backends × all lock modes)
 ```
 
 ---
 
-## Environment Variables (key ones)
+## Environment Variables
 
 | Variable | Service | Values | Default |
 |---|---|---|---|
-| `DB_BACKEND` | inventory, booking | `mysql` \| `dynamodb` | `mysql` |
+| `DB_BACKEND` | booking | `mysql` \| `dynamodb` | `mysql` |
 | `LOCK_MODE` | booking | `none` \| `optimistic` \| `pessimistic` | `pessimistic` |
+| `BOOKING_SERVICE_URL` | experiment1 | URL to booking service | required |
 | `ADMISSION_RATE` | queue | integer (admissions/sec) | `10` |
 | `FAIRNESS_MODE` | queue | `collapse` \| `allow_multiple` | `allow_multiple` |
 | `AUTOSCALING_CPU_TARGET` | Terraform var | integer (%) | `70` |
 
-All of these are Terraform variables too — override them in `terraform/main/variables.tf` or pass `-var` flags.
+> **Note:** `lock_mode` and `db_backend` can also be passed per-request in the booking service — experiment1 uses this to test all 6 combinations without redeploying.
 
 ---
 
@@ -53,63 +59,28 @@ All of these are Terraform variables too — override them in `terraform/main/va
 
 ```bash
 export AWS_REGION=us-east-1
-# Make sure `aws sts get-caller-identity` works before continuing
-aws sts get-caller-identity
+aws sts get-caller-identity   # verify credentials work
 ```
 
-### Step 2 — Make scripts executable (first time only)
+### Step 2 — Deploy everything
 
 ```bash
-chmod +x scripts/deploy.sh scripts/cleanup.sh scripts/test-platform.sh
-```
-
-### Step 3 — Deploy everything
-
-```bash
-./scripts/deploy.sh
+bash scripts/deploy.sh
 ```
 
 This will:
-1. Run `go mod tidy` on all three services
+1. Run `go mod tidy` on all services
 2. Run `terraform init` and `terraform apply`
-3. Build all three Docker images locally
-4. Push them to ECR
-5. Provision: VPC, NAT, ALB, RDS MySQL, DynamoDB (5 tables), ECS (3 services), CloudWatch
-6. Wait for all health checks to pass
+3. Build all Docker images locally (`--platform linux/amd64`) and push to ECR
+4. Provision: VPC, NAT, ALB, RDS MySQL, DynamoDB (5 tables), ECS (3 services), CloudWatch
+5. Wait for all health checks to pass
 
 **Expected time: 8–12 minutes** (RDS takes the longest)
 
-### Step 4 — Verify
+### Step 3 — Verify
 
 ```bash
-./scripts/test-platform.sh
-```
-
-<<<<<<< HEAD
-This runs a full smoke test — health checks, all endpoints, a real booking, a real queue join. You should see all `[PASS]` before handing off to teammates.
-=======
-This runs a smoke test.
->>>>>>> 2a97134d320d594889aeaabebcd91464202f2163
-
----
-
-## Switching Database Backend
-
-To switch between MySQL and DynamoDB without redeploying from scratch:
-
-```bash
-cd terraform/main
-terraform apply -auto-approve -var="db_backend=dynamodb"
-# Wait for ECS to stabilise (~2-3 min)
-aws ecs wait services-stable \
-  --cluster concert-platform-booking-cluster \
-  --services concert-platform-booking \
-  --region us-east-1
-```
-
-Switch back:
-```bash
-terraform apply -auto-approve -var="db_backend=mysql"
+bash scripts/test-platform.sh
 ```
 
 ---
@@ -117,80 +88,92 @@ terraform apply -auto-approve -var="db_backend=mysql"
 ## Tearing Down
 
 ```bash
-./scripts/cleanup.sh
+bash scripts/cleanup.sh
 ```
 
-Type `yes` when prompted. This destroys everything — NAT Gateway, RDS, ECS, ECR, DynamoDB.
+Type `yes` when prompted. Scales down ECS, clears ECR images, then runs `terraform destroy`.
 
 ---
 
-<<<<<<< HEAD
-## TO DO — Experiment Guide
-=======
-## FUTURE WORK — Experiment Guide
->>>>>>> 2a97134d320d594889aeaabebcd91464202f2163
+## Experiment Guide
 
-All experiments are controlled through environment variables passed to Terraform or via the runtime API endpoints on the queue service. No Go code changes are needed for any experiment.
+### Experiment 1 — Concurrency Control Under Flash Sale Load
 
-### Experiment 1 — Concurrency Control
+**What it tests:** Three locking strategies (none / optimistic / pessimistic) against two storage backends (MySQL/RDS and DynamoDB), with all users simultaneously rushing the last available seat.
 
-**What to change:** `LOCK_MODE` on the booking service.
+**Architecture:** Locust runs locally and hits the main booking-service on ECS directly — no separate experiment service. The booking-service accepts `lock_mode` and `db_backend` per request so all 6 combinations can be tested in a single run.
+
+#### Deploy
 
 ```bash
-cd terraform/main
-
-# Baseline — no concurrency control (oversells expected)
-terraform apply -auto-approve -var="lock_mode=none"
-
-# Optimistic locking
-terraform apply -auto-approve -var="lock_mode=optimistic"
-
-# Pessimistic locking (default)
-terraform apply -auto-approve -var="lock_mode=pessimistic"
+# Deploy the main platform — experiment1 runs on top of it
+bash scripts/deploy.sh
 ```
 
-**What to measure:** Hit `POST /booking/api/v1/bookings` concurrently with Locust.
-After each run, check oversell count:
+#### Run the full Locust benchmark
+
 ```bash
-curl http://<ALB>/booking/api/v1/metrics?event_id=evt-001
-```
-Key fields: `oversell_count`, `bookings_per_sec`, `lock_mode`.
+# All 6 combinations: mysql×3 + dynamodb×3
+bash scripts/exp1-locust-test.sh
 
-**CloudWatch metrics to capture:** ECS CPU, response time from ALB target group.
+# Override concurrency
+CONCURRENCY=1000 bash scripts/exp1-locust-test.sh
+
+# Single backend only
+BACKENDS="mysql" bash scripts/exp1-locust-test.sh
+```
+
+Results are saved to `results/exp1_<timestamp>.csv` after each run.
+
+**Expected results (1000 users):**
+
+| Backend | Lock Mode | Bookings | Oversells | Notes |
+|---|---|---|---|---|
+| MySQL | none | ~630 | ~630 | Baseline — race window causes oversells |
+| MySQL | optimistic | 1 | 0 | CAS retry on version column |
+| MySQL | pessimistic | 1 | 0 | `SELECT ... FOR UPDATE` |
+| DynamoDB | none | ~1000 | ~999 | Baseline |
+| DynamoDB | optimistic | 1 | 0 | Conditional UpdateItem on version |
+| DynamoDB | pessimistic | 1 | 0 | Conditional write with in-progress fence |
+
+> **Note on concurrency:** Keep `CONCURRENCY` at or below 5,000 — the Fargate task is 512 CPU / 1 GB RAM and will OOM above that.
+
+#### CloudWatch logs
+
+```bash
+aws logs tail /ecs/concert-platform-booking --follow --region us-east-1
+```
 
 ---
 
 ### Experiment 2 — Virtual Queue as Demand Buffer
 
-**What to test:** Compare direct booking load (bypass queue) vs queue-buffered load.
+**What to test:** Compare direct booking load vs queue-buffered load on the booking service.
 
-**Without queue:** Send Locust traffic directly to:
+**Without queue:**
 ```
 POST http://<ALB>/booking/api/v1/bookings
 ```
 
-**With queue:** Send Locust traffic to join queue first, then poll for admission:
+**With queue:**
 ```
 POST http://<ALB>/queue/api/v1/queue/join
 GET  http://<ALB>/queue/api/v1/queue/<queue_id>/status
-# Once status == "admitted", proceed to book
+# Once status == "admitted" → book
 POST http://<ALB>/booking/api/v1/bookings
 ```
 
 **What to measure:**
 ```bash
-# Queue depth during load
 curl http://<ALB>/queue/api/v1/queue/evt-001/metrics
 ```
 Key fields: `queue_depth`, `total_admitted`, `admission_rate_hz`.
 
-**CloudWatch:** ECS CPU on booking-service — should be much lower in the queued scenario.
+**CloudWatch:** ECS CPU on booking-service — should be significantly lower in the queued scenario.
 
 ---
 
 ### Experiment 3 — Auto Scaling Under Ticket Drop Load
-
-**What to change:** CPU target threshold and cooldown periods via Terraform.
 
 ```bash
 cd terraform/main
@@ -205,15 +188,11 @@ terraform apply -auto-approve \
   -var="autoscaling_cpu_target=90"
 ```
 
-**Load shape to simulate:** Near-zero → instant spike → sustained → drop-off.
-Use Locust with a custom load shape class for this.
+**Load shape:** Near-zero → instant spike → sustained → drop-off. Use a Locust custom load shape class.
 
-**What to watch in AWS Console:**
-- ECS Service → Tasks tab (watch task count climb)
-- CloudWatch → ECS → CPUUtilization per service
-- ALB → Target Group → Healthy host count
+**What to watch:** ECS Service → Tasks tab, CloudWatch ECS CPUUtilization, ALB Target Group healthy host count.
 
-**Runtime admission rate change (no redeploy needed):**
+**Runtime admission rate (no redeploy):**
 ```bash
 curl -X POST http://<ALB>/queue/api/v1/queue/event/evt-001/admission-rate \
   -H "Content-Type: application/json" \
@@ -224,9 +203,8 @@ curl -X POST http://<ALB>/queue/api/v1/queue/event/evt-001/admission-rate \
 
 ### Experiment 4 — Multiple Concurrent Flash Sales
 
-**What to test:** Run simultaneous Locust campaigns targeting different events.
+Run simultaneous Locust workers targeting different events:
 
-Use all 5 pre-seeded events:
 ```
 evt-001  Taylor Swift    (1000 seats)
 evt-002  Coldplay        (500 seats)
@@ -235,23 +213,20 @@ evt-004  Billie Eilish   (100 seats)
 evt-005  Drake           (2000 seats)
 ```
 
-Run separate Locust workers per event and check whether load bleeds across.
-
-**What to measure:** Per-event response times and booking success rates from:
+**What to measure:**
 ```bash
 curl http://<ALB>/booking/api/v1/events/evt-001/bookings
-curl http://<ALB>/booking/api/v1/events/evt-002/bookings
-# etc.
+curl http://<ALB>/booking/api/v1/metrics?event_id=evt-001
 ```
 
 ---
 
 ### Experiment 5 — Multiple Requests from the Same User
 
-**What to change:** `FAIRNESS_MODE` — toggle at runtime, no redeploy needed.
+Toggle `FAIRNESS_MODE` at runtime — no redeploy needed.
 
 ```bash
-# Allow multiple queue slots per IP (default — higher throughput)
+# Allow multiple queue slots per IP (higher throughput, less fair)
 curl -X POST http://<ALB>/queue/api/v1/queue/event/evt-001/fairness-mode \
   -H "Content-Type: application/json" \
   -d '{"mode": "allow_multiple"}'
@@ -262,40 +237,27 @@ curl -X POST http://<ALB>/queue/api/v1/queue/event/evt-001/fairness-mode \
   -d '{"mode": "collapse"}'
 ```
 
-**What to measure:** Queue position distribution and throughput from:
-```bash
-curl http://<ALB>/queue/api/v1/queue/evt-001/metrics
-```
-Key fields: `queue_depth`, `total_admitted`, `fairness_mode`.
-
 ---
 
 ## Useful Commands
 
 ```bash
-# Get all Terraform outputs
+# All Terraform outputs
 cd terraform/main && terraform output
 
-# Watch ECS service task count live
+# Watch ECS task count live
 watch -n 5 'aws ecs describe-services \
   --cluster concert-platform-booking-cluster \
   --services concert-platform-booking \
   --region us-east-1 \
   --query "services[0].runningCount"'
 
-# Tail CloudWatch logs for booking service
-aws logs tail /ecs/concert-platform-booking --follow --region us-east-1
-
-# Tail CloudWatch logs for inventory service
+# Tail CloudWatch logs
 aws logs tail /ecs/concert-platform-inventory --follow --region us-east-1
+aws logs tail /ecs/concert-platform-booking   --follow --region us-east-1
+aws logs tail /ecs/concert-platform-queue     --follow --region us-east-1
 
-# Tail CloudWatch logs for queue service
-aws logs tail /ecs/concert-platform-queue --follow --region us-east-1
-
-# Check ALB DNS
-cd terraform/main && terraform output alb_dns_name
-
-# Manual health checks
+# Health checks
 ALB=$(cd terraform/main && terraform output -raw alb_dns_name)
 curl http://$ALB/inventory/health
 curl http://$ALB/booking/health
@@ -304,7 +266,7 @@ curl http://$ALB/queue/health
 
 ---
 
-## Full API Reference
+## API Reference
 
 ### Inventory Service — `http://<ALB>/inventory`
 
@@ -313,7 +275,7 @@ curl http://$ALB/queue/health
 | GET | `/health` | Health check |
 | GET | `/api/v1/events` | List all events |
 | GET | `/api/v1/events/:event_id` | Get single event |
-| GET | `/api/v1/events/:event_id/seats` | List seats for event |
+| GET | `/api/v1/events/:event_id/seats` | List seats |
 | GET | `/api/v1/events/:event_id/availability` | Available seat count |
 
 ### Booking Service — `http://<ALB>/booking`
@@ -321,12 +283,12 @@ curl http://$ALB/queue/health
 | Method | Path | Description |
 |---|---|---|
 | GET | `/health` | Health check |
-| POST | `/api/v1/bookings` | Create booking `{"event_id","seat_id","customer_id"}` |
+| POST | `/api/v1/bookings` | Create booking `{"event_id","seat_id","customer_id","lock_mode","db_backend"}` |
 | GET | `/api/v1/bookings/:booking_id` | Get booking |
 | GET | `/api/v1/events/:event_id/bookings` | List bookings for event |
 | DELETE | `/api/v1/bookings/:booking_id` | Cancel booking |
-| GET | `/api/v1/metrics?event_id=` | Live metrics (oversells, bookings/sec, lock_mode) |
-| POST | `/api/v1/reset` | Reset all booking data (also resets inventory) |
+| GET | `/api/v1/metrics?event_id=&db_backend=` | Live metrics (oversells, bookings/sec) |
+| DELETE | `/api/v1/internal/events/:event_id/data` | Cleanup test data for event |
 
 ### Queue Service — `http://<ALB>/queue`
 
@@ -342,7 +304,7 @@ curl http://$ALB/queue/health
 
 ---
 
-## Seeded Events (available immediately after deploy)
+## Seeded Events
 
 | Event ID | Name | Venue | Seats |
 |---|---|---|---|
