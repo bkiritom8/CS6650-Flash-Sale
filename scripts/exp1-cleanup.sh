@@ -10,15 +10,12 @@ REGION="us-east-1"
 ECR_REPO="${SERVICE_NAME}-experiment1"
 ECS_CLUSTER="${SERVICE_NAME}-experiment1-cluster"
 ECS_SERVICE="${SERVICE_NAME}-experiment1"
-MONGODB_TAG_KEY="Name"
-MONGODB_TAG_VALUE="${SERVICE_NAME}-exp1-mongodb"
 
 echo "================================================"
 echo "  Experiment 1 — Cleanup"
 echo "  This will destroy experiment1 AWS resources:"
 echo "    ECR repo, ECS cluster/service/task,"
 echo "    ALB target group + listener rule,"
-echo "    MongoDB EC2 instance + security group,"
 echo "    CloudWatch log group"
 echo "  (Main platform infra is NOT affected)"
 echo "================================================"
@@ -69,30 +66,7 @@ else
   echo "   No images found — skipping."
 fi
 
-# ── 3. Force-terminate the MongoDB EC2 instance ───────────────────────────────
-echo ""
-echo ">> Terminating MongoDB EC2 instance (tag ${MONGODB_TAG_KEY}=${MONGODB_TAG_VALUE})..."
-INSTANCE_IDS=$(aws ec2 describe-instances \
-  --filters "Name=tag:${MONGODB_TAG_KEY},Values=${MONGODB_TAG_VALUE}" \
-            "Name=instance-state-name,Values=pending,running,stopping,stopped" \
-  --query "Reservations[*].Instances[*].InstanceId" \
-  --output text \
-  --region "${REGION}" 2>/dev/null || true)
-if [ -n "${INSTANCE_IDS}" ]; then
-  echo "   Terminating: ${INSTANCE_IDS}"
-  aws ec2 terminate-instances \
-    --instance-ids ${INSTANCE_IDS} \
-    --region "${REGION}" > /dev/null
-  echo "   Waiting for termination..."
-  aws ec2 wait instance-terminated \
-    --instance-ids ${INSTANCE_IDS} \
-    --region "${REGION}" || true
-  echo "   Instance(s) terminated."
-else
-  echo "   No running MongoDB instance found — skipping."
-fi
-
-# ── 4. Terraform destroy for remaining resources ──────────────────────────────
+# ── 3. Terraform destroy for remaining resources ──────────────────────────────
 echo ""
 echo ">> Running terraform destroy..."
 cd "${TF_DIR}"

@@ -16,16 +16,14 @@ import (
 // It spawns `concurrency` goroutines simultaneously (via a shared start channel)
 // so all writers hit the DB at the same instant, maximising contention.
 type Runner struct {
-	mysqlRepo    Repository
-	dynamoRepo   Repository
-	mongoRepo    Repository
+	mysqlRepo  Repository
+	dynamoRepo Repository
 }
 
-func NewRunner(mysqlRepo, dynamoRepo, mongoRepo Repository) *Runner {
+func NewRunner(mysqlRepo, dynamoRepo Repository) *Runner {
 	return &Runner{
 		mysqlRepo:  mysqlRepo,
 		dynamoRepo: dynamoRepo,
-		mongoRepo:  mongoRepo,
 	}
 }
 
@@ -229,13 +227,8 @@ func (r *Runner) repoFor(backend DBBackend) (Repository, error) {
 			return nil, fmt.Errorf("DynamoDB backend not configured")
 		}
 		return r.dynamoRepo, nil
-	case BackendMongoDB:
-		if r.mongoRepo == nil {
-			return nil, fmt.Errorf("MongoDB backend not configured")
-		}
-		return r.mongoRepo, nil
 	default:
-		return nil, fmt.Errorf("unknown db_backend %q, must be 'mysql', 'dynamodb', or 'mongodb'", backend)
+		return nil, fmt.Errorf("unknown db_backend %q, must be 'mysql' or 'dynamodb'", backend)
 	}
 }
 

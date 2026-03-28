@@ -11,7 +11,7 @@ SPAWN_RATE="${SPAWN_RATE:-10000}"
 RUN_TIME="${RUN_TIME:-60s}"
 MAX_RETRIES="${MAX_RETRIES:-3}"
 # Space-separated list of backends to test
-BACKENDS="${BACKENDS:-mysql dynamodb mongodb}"
+BACKENDS="${BACKENDS:-mysql dynamodb}"
 
 PASS=0
 FAIL=0

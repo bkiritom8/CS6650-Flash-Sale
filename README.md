@@ -122,9 +122,9 @@ Type `yes` when prompted. Scales down ECS, clears ECR images, terminates EC2 ins
 
 ### Experiment 1 — Concurrency Control Under Flash Sale Load
 
-**What it tests:** Three locking strategies (none / optimistic / pessimistic) against three storage backends (MySQL, DynamoDB, MongoDB), with all users simultaneously rushing the last available seat.
+**What it tests:** Three locking strategies (none / optimistic / pessimistic) against two storage backends (MySQL/RDS and DynamoDB), with all users simultaneously rushing the last available seat.
 
-**Architecture:** Separate ECS Fargate service + ECR repo + ALB rule, attaching to the main platform's VPC/ALB/RDS/DynamoDB. MongoDB runs on a dedicated `t3.small` EC2 in the same private VPC (DocumentDB requires IAM permissions not available on AWS Academy).
+**Architecture:** Separate ECS Fargate service + ECR repo + ALB rule, attaching to the main platform's VPC/ALB/RDS/DynamoDB.
 
 #### Deploy
 
@@ -136,14 +136,14 @@ bash scripts/exp1-deploy.sh
 #### Run the full Locust benchmark
 
 ```bash
-# All 9 combinations: mysql×3 + dynamodb×3 + mongodb×3
+# All 6 combinations: mysql×3 + dynamodb×3
 bash scripts/exp1-locust-test.sh
 
 # Override concurrency and run time
 CONCURRENCY=1000 RUN_TIME=30s bash scripts/exp1-locust-test.sh
 
-# Test specific backends only
-BACKENDS="mysql mongodb" bash scripts/exp1-locust-test.sh
+# Test a single backend
+BACKENDS="mysql" bash scripts/exp1-locust-test.sh
 ```
 
 The test uses a **waiting-room pattern**: all users spawn first, then rush the booking endpoint simultaneously to maximise contention.
@@ -158,9 +158,6 @@ The test uses a **waiting-room pattern**: all users spawn first, then rush the b
 | DynamoDB | none | ~1000 | ~999 | Baseline |
 | DynamoDB | optimistic | 1 | 0 | Conditional UpdateItem on version |
 | DynamoDB | pessimistic | 1 | 0 | TransactWriteItems (atomic) |
-| MongoDB | none | ~1000 | ~999 | Baseline |
-| MongoDB | optimistic | 1 | 0 | findOneAndUpdate with version |
-| MongoDB | pessimistic | 1 | 0 | Atomic findOneAndUpdate |
 
 > **Note on concurrency:** The default is 100,000 users. The Fargate task is 512 CPU / 1 GB RAM — keep `CONCURRENCY` at or below 5,000 to avoid OOM crashes mid-test.
 

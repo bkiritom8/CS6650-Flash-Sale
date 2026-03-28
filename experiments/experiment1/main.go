@@ -17,7 +17,6 @@ func main() {
 
 	var mysqlRepo Repository
 	var dynamoRepo Repository
-	var mongoRepo Repository
 
 	// ── MySQL ─────────────────────────────────────────────────────────────────
 	mysqlHost := os.Getenv("MYSQL_HOST")
@@ -57,28 +56,11 @@ func main() {
 		log.Println("DYNAMODB_*_TABLE env vars not set — DynamoDB backend disabled")
 	}
 
-	// ── MongoDB ───────────────────────────────────────────────────────────────
-	mongoURI := os.Getenv("MONGODB_URI")
-	if mongoURI != "" {
-		var err error
-		mongoRepo, err = NewMongoDBRepo(
-			mongoURI,
-			getEnvOrDefault("MONGODB_DB", "concertdb"),
-		)
-		if err != nil {
-			log.Fatalf("init MongoDB repo: %v", err)
-		}
-		defer mongoRepo.Close()
-		log.Printf("MongoDB backend ready: %s", mongoURI)
-	} else {
-		log.Println("MONGODB_URI not set — MongoDB backend disabled")
+	if mysqlRepo == nil && dynamoRepo == nil {
+		log.Fatal("no database backends configured — set MYSQL_HOST or DYNAMODB_*_TABLE env vars")
 	}
 
-	if mysqlRepo == nil && dynamoRepo == nil && mongoRepo == nil {
-		log.Fatal("no database backends configured — set MYSQL_HOST, DYNAMODB_*_TABLE, or MONGODB_URI env vars")
-	}
-
-	runner := NewRunner(mysqlRepo, dynamoRepo, mongoRepo)
+	runner := NewRunner(mysqlRepo, dynamoRepo)
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()

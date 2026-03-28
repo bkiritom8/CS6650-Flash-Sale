@@ -31,7 +31,7 @@ _cfg: dict = {}
 @events.init_command_line_parser.add_listener
 def add_args(parser, **kwargs):
     parser.add_argument("--lock-mode",   default="none",      choices=["none", "optimistic", "pessimistic"])
-    parser.add_argument("--db-backend",  default="mysql",     choices=["mysql", "dynamodb", "mongodb"])
+    parser.add_argument("--db-backend",  default="mysql",     choices=["mysql", "dynamodb"])
     parser.add_argument("--max-retries", default=3,           type=int)
     parser.add_argument("--event-id",    default="",          help="Pre-initialised event_id from test.sh")
     parser.add_argument("--seat-id",     default="seat-last", help="Seat to contest")

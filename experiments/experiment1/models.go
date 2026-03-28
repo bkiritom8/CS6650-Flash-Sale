@@ -21,7 +21,6 @@ type DBBackend string
 const (
 	BackendMySQL    DBBackend = "mysql"
 	BackendDynamoDB DBBackend = "dynamodb"
-	BackendMongoDB  DBBackend = "mongodb"
 )
 
 // RunRequest configures a single experiment run.
