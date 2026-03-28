@@ -176,4 +176,5 @@ func (h *Handler) resetBookings(c *gin.Context) {
 		return
 	}
 	defer resp.Body.Close()
+	c.JSON(http.StatusOK, gin.H{"status": "booking and inventory reset"})
 }

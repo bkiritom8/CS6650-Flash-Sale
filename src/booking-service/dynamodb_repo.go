@@ -323,6 +323,7 @@ func (r *DynamoDBRepo) itemToBooking(item map[string]types.AttributeValue) *Book
 
 func (r *DynamoDBRepo) ResetBookings(ctx context.Context) error {
 	// Scan and delete all items in bookings table (DynamoDB has no truncate)
+	var requests []types.WriteRequest
 	var lastEvaluatedKey map[string]types.AttributeValue
 	input := &dynamodb.ScanInput{
 		TableName:         aws.String(r.bookingsTable),
@@ -331,15 +332,54 @@ func (r *DynamoDBRepo) ResetBookings(ctx context.Context) error {
 	for {
 		out, err := r.client.Scan(ctx, input)
 		if err != nil {
-			return fmt.Errorf("deleting booking: %w", err)
+			return fmt.Errorf("scanning booking: %w", err)
 		}
+
+		for _, item := range out.Items {
+			requests = append(requests, types.WriteRequest{
+				DeleteRequest: &types.DeleteRequest{
+					Key: map[string]types.AttributeValue{
+						"booking_id": &types.AttributeValueMemberS{Value: item["booking_id"].(*types.AttributeValueMemberS).Value},
+					},
+				},
+			})
+
+			if len(requests) == 25 {
+				_, err := r.client.BatchWriteItem(ctx, &dynamodb.BatchWriteItemInput{
+					RequestItems: map[string][]types.WriteRequest{
+						r.bookingsTable: requests,
+					},
+				})
+				if err != nil {
+					return fmt.Errorf("batch deleting bookings: %w", err)
+				}
+				requests = nil
+			}
+		}
+
 		lastEvaluatedKey = out.LastEvaluatedKey
+		input.ExclusiveStartKey = lastEvaluatedKey
 
 		if lastEvaluatedKey == nil {
 			break
 		}
 
 	}
+
+	// Delete any remaining items
+	if len(requests) > 0 {
+		_, err := r.client.BatchWriteItem(ctx, &dynamodb.BatchWriteItemInput{
+			RequestItems: map[string][]types.WriteRequest{
+				r.bookingsTable: requests,
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("batch deleting bookings: %w", err)
+		}
+		requests = nil
+	}
+
+	log.Println("DynamoDB bookings deleted.")
 
 	// Similarly clear versions and oversells tables
 	lastEvaluatedKey = nil
@@ -350,16 +390,56 @@ func (r *DynamoDBRepo) ResetBookings(ctx context.Context) error {
 	for {
 		out, err := r.client.Scan(ctx, input)
 		if err != nil {
-			return fmt.Errorf("deleting oversell: %w", err)
+			return fmt.Errorf("scanning oversell: %w", err)
 		}
+
+		for _, item := range out.Items {
+			requests = append(requests, types.WriteRequest{
+				DeleteRequest: &types.DeleteRequest{
+					Key: map[string]types.AttributeValue{
+						"oversell_id": &types.AttributeValueMemberS{Value: item["oversell_id"].(*types.AttributeValueMemberS).Value},
+					},
+				},
+			})
+
+			if len(requests) == 25 {
+				_, err := r.client.BatchWriteItem(ctx, &dynamodb.BatchWriteItemInput{
+					RequestItems: map[string][]types.WriteRequest{
+						r.oversellsTable: requests,
+					},
+				})
+				if err != nil {
+					return fmt.Errorf("batch deleting oversells: %w", err)
+				}
+				requests = nil
+			}
+		}
+
 		lastEvaluatedKey = out.LastEvaluatedKey
+		input.ExclusiveStartKey = lastEvaluatedKey
 
 		if lastEvaluatedKey == nil {
 			break
 		}
-
 	}
 
+	// Delete any remaining items
+	if len(requests) > 0 {
+		_, err := r.client.BatchWriteItem(ctx, &dynamodb.BatchWriteItemInput{
+			RequestItems: map[string][]types.WriteRequest{
+				r.oversellsTable: requests,
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("batch deleting oversells: %w", err)
+		}
+
+		requests = nil
+	}
+
+	log.Printf("DynamoDB oversells deleted.")
+
+	// Delete versions data
 	lastEvaluatedKey = nil
 	input = &dynamodb.ScanInput{
 		TableName:         aws.String(r.versionsTable),
@@ -368,15 +448,53 @@ func (r *DynamoDBRepo) ResetBookings(ctx context.Context) error {
 	for {
 		out, err := r.client.Scan(ctx, input)
 		if err != nil {
-			return fmt.Errorf("deleting version: %w", err)
+			return fmt.Errorf("scanning version: %w", err)
 		}
+
+		for _, item := range out.Items {
+			requests = append(requests, types.WriteRequest{
+				DeleteRequest: &types.DeleteRequest{
+					Key: map[string]types.AttributeValue{
+						"event_id": &types.AttributeValueMemberS{Value: item["event_id"].(*types.AttributeValueMemberS).Value},
+						"seat_id":  &types.AttributeValueMemberS{Value: item["seat_id"].(*types.AttributeValueMemberS).Value},
+					},
+				},
+			})
+
+			if len(requests) == 25 {
+				_, err := r.client.BatchWriteItem(ctx, &dynamodb.BatchWriteItemInput{
+					RequestItems: map[string][]types.WriteRequest{
+						r.versionsTable: requests,
+					},
+				})
+				if err != nil {
+					return fmt.Errorf("batch deleting versions: %w", err)
+				}
+				requests = nil
+			}
+		}
+
 		lastEvaluatedKey = out.LastEvaluatedKey
+		input.ExclusiveStartKey = lastEvaluatedKey
 
 		if lastEvaluatedKey == nil {
 			break
 		}
 
 	}
+	// Delete any remaining items
+	if len(requests) > 0 {
+		_, err := r.client.BatchWriteItem(ctx, &dynamodb.BatchWriteItemInput{
+			RequestItems: map[string][]types.WriteRequest{
+				r.versionsTable: requests,
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("batch deleting versions: %w", err)
+		}
+	}
+
+	log.Printf("DynamoDB versions deleted.")
 
 	return nil
 }
