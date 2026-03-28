@@ -259,32 +259,51 @@ p50 = [int(r['p50_ms']) if r.get('p50_ms','') not in ('-','') else 0 for r in da
 p95 = [int(r['p95_ms']) if r.get('p95_ms','') not in ('-','') else 0 for r in data]
 p99 = [int(r['p99_ms']) if r.get('p99_ms','') not in ('-','') else 0 for r in data]
 
-x = np.arange(len(labels))
-fig, axes = plt.subplots(1, 2, figsize=(14, 6))
-fig.suptitle(f"Experiment 1 — Locking Strategy Benchmark ({concurrency} users, 1 seat)", fontsize=14, fontweight='bold')
+mysql_idx  = [i for i,r in enumerate(data) if r['backend']=='mysql']
+dynamo_idx = [i for i,r in enumerate(data) if r['backend']=='dynamodb']
+mode_labels = [data[i]['lock_mode'] for i in mysql_idx]
 
-ax = axes[0]
-ax.bar(x, legit,     0.55, label='Legitimate booking',           color='#2ecc71')
-ax.bar(x, oversells, 0.55, bottom=legit, label='Oversells',      color='#e74c3c')
-ax.bar(x, failed,    0.55, bottom=[l+o for l,o in zip(legit,oversells)], label='Failed (never reached DB)', color='#bdc3c7')
-ax.axhline(concurrency, color='black', linewidth=0.8, linestyle='--', label=f'Total users ({concurrency})')
-ax.set_title("Booking Outcomes per Strategy")
-ax.set_ylabel("Requests")
-ax.set_xticks(x); ax.set_xticklabels(labels, fontsize=9)
-ax.legend(fontsize=8); ax.set_ylim(0, concurrency * 1.1)
+fig = plt.figure(figsize=(16, 7))
+fig.suptitle(f"Experiment 1 — Locking Strategy Benchmark ({concurrency} users, 1 seat)",
+             fontsize=14, fontweight='bold', y=1.01)
+
+# ── Left: stacked outcomes ────────────────────────────────────────────────────
+ax1 = fig.add_subplot(1, 3, 1)
+x = np.arange(len(labels))
+w = 0.5
+ax1.bar(x, legit,     w, label='Legitimate', color='#2ecc71')
+ax1.bar(x, oversells, w, bottom=legit, label='Oversells', color='#e74c3c')
+ax1.bar(x, failed,    w, bottom=[l+o for l,o in zip(legit,oversells)], label='Failed', color='#bdc3c7')
+ax1.axhline(concurrency, color='black', linewidth=0.8, linestyle='--')
+ax1.set_title("Booking Outcomes")
+ax1.set_ylabel("Requests")
+ax1.set_xticks(x); ax1.set_xticklabels(labels, fontsize=8)
+ax1.set_ylim(0, concurrency * 1.25)
+ax1.legend(loc='upper right', fontsize=8, framealpha=0.9)
 for i, (l, o) in enumerate(zip(legit, oversells)):
     if o > 0:
-        ax.text(i, l + o/2, str(o), ha='center', va='center', fontsize=7, color='white', fontweight='bold')
+        ax1.text(i, l + o/2, str(o), ha='center', va='center', fontsize=7, color='white', fontweight='bold')
 
-ax2 = axes[1]
-w = 0.2
-ax2.bar(x - w, p50, w, label='p50', color='#3498db')
-ax2.bar(x,     p95, w, label='p95', color='#e67e22')
-ax2.bar(x + w, p99, w, label='p99', color='#9b59b6')
-ax2.set_title("Latency by Strategy (ms)")
-ax2.set_ylabel("Latency (ms)")
-ax2.set_xticks(x); ax2.set_xticklabels(labels, fontsize=9)
-ax2.legend(fontsize=8)
+def latency_chart(ax, idx, title):
+    xv = np.arange(len(idx))
+    bw = 0.25
+    b50 = ax.bar(xv - bw, [p50[i] for i in idx], bw, label='p50', color='#3498db')
+    b95 = ax.bar(xv,      [p95[i] for i in idx], bw, label='p95', color='#e67e22')
+    b99 = ax.bar(xv + bw, [p99[i] for i in idx], bw, label='p99', color='#9b59b6')
+    ax.set_title(title); ax.set_ylabel("Latency (ms)")
+    ax.set_xticks(xv); ax.set_xticklabels(mode_labels, fontsize=9)
+    ax.legend(fontsize=8, loc='upper right', framealpha=0.9)
+    max_v = max([p99[i] for i in idx] + [1])
+    ax.set_ylim(0, max_v * 1.4)
+    for bars in [b50, b95, b99]:
+        for bar in bars:
+            h = bar.get_height()
+            if h > 0:
+                ax.text(bar.get_x() + bar.get_width()/2, h + max_v*0.01,
+                        str(h), ha='left', va='bottom', fontsize=7, rotation=45)
+
+latency_chart(fig.add_subplot(1, 3, 2), mysql_idx,  "MySQL — Latency (ms)")
+latency_chart(fig.add_subplot(1, 3, 3), dynamo_idx, "DynamoDB — Latency (ms)")
 
 plt.tight_layout()
 plt.savefig(png_path, dpi=150, bbox_inches='tight')
