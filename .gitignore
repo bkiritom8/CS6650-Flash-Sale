@@ -2,6 +2,7 @@
 **/.terraform/
 *.tfstate
 *.tfstate.backup
+*.tfstate.lock.info
 *.tfvars
 .terraform.lock.hcl
 
@@ -13,6 +14,7 @@
 src/*/inventory-service
 src/*/booking-service
 src/*/queue-service
+src/experiment1/experiment1
 experiments/experiment1/experiment1
 
 # Node
