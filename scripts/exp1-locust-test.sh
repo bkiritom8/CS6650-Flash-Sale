@@ -275,16 +275,21 @@ ax1.bar(x, legit,     w, label='Legitimate', color='#2ecc71')
 ax1.bar(x, oversells, w, bottom=legit, label='Oversells', color='#e74c3c')
 ax1.bar(x, failed,    w, bottom=[l+o for l,o in zip(legit,oversells)], label='Failed', color='#bdc3c7')
 ax1.axhline(concurrency, color='black', linewidth=0.8, linestyle='--', label=f'{concurrency} users')
-ax1.set_yscale('log')
-ax1.set_ylim(0.8, concurrency * 2)
-ax1.set_title("Booking Outcomes (log scale)")
-ax1.set_ylabel("Requests (log scale)")
+ax1.set_yscale('function', functions=(lambda x: np.sqrt(np.maximum(x, 0)), lambda x: x**2))
+ax1.set_ylim(0, concurrency * 1.1)
+yticks = [t for t in [1, 10, 50, 100, 250, 500, 750, 1000, 2000, 5000, 10000, 50000, 100000] if t <= concurrency * 1.1]
+ax1.set_yticks(yticks); ax1.set_yticklabels([str(t) for t in yticks])
+ax1.set_title("Booking Outcomes (sqrt scale)")
+ax1.set_ylabel("Requests (sqrt scale)")
 ax1.set_xticks(x); ax1.set_xticklabels(labels, fontsize=8)
 ax1.legend(loc='upper right', fontsize=8, framealpha=0.9)
-for i, (l, o) in enumerate(zip(legit, oversells)):
-    ax1.text(i, max(l, 0.9), str(l), ha='center', va='bottom', fontsize=7, color='#27ae60', fontweight='bold')
+for i, (l, o, fa) in enumerate(zip(legit, oversells, failed)):
+    if l > 0:
+        ax1.text(i, np.sqrt(l) ** 2 * 0 + l, str(l), ha='center', va='bottom', fontsize=7, color='#27ae60', fontweight='bold')
     if o > 0:
-        ax1.text(i, l + max(o, 0.9), str(o), ha='center', va='bottom', fontsize=7, color='#c0392b', fontweight='bold')
+        ax1.text(i, l + o, str(o), ha='center', va='bottom', fontsize=7, color='#c0392b', fontweight='bold')
+    if fa > 0:
+        ax1.text(i, l + o + fa, str(fa), ha='center', va='bottom', fontsize=7, color='#7f8c8d', fontweight='bold')
 
 def latency_chart(ax, idx, title):
     xv = np.arange(len(idx))
