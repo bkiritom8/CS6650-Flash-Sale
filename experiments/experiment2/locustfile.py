@@ -1,7 +1,7 @@
 import time
 import itertools
 import uuid
-from locust import HttpUser, task, between, events
+from locust import HttpUser, task, between, events, StopUser
 
 # ---------------------------------------------------------------------------
 # Config
@@ -51,6 +51,7 @@ class DirectBookingUser(HttpUser):
         #customer_id = str(uuid.uuid4())
         customer_id = 100 + seat_number
         make_booking(self.client, EVENT_ID, seat_number, customer_id)
+        raise StopUser()  # each user only makes one booking attempt
 
 
 # ---------------------------------------------------------------------------
@@ -109,3 +110,4 @@ class QueuedBookingUser(HttpUser):
         # --- Phase 3: Book (only if admitted) ---
         if admitted:
             make_booking(self.client, EVENT_ID, seat_number, customer_id)
+        raise StopUser()  # each user only makes one booking attempt
