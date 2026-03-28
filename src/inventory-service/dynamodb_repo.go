@@ -14,7 +14,7 @@ import (
 )
 
 type DynamoDBRepo struct {
-	client     *dynamodb.Client
+	client      *dynamodb.Client
 	eventsTable string
 	seatsTable  string
 }
@@ -265,6 +265,123 @@ func (r *DynamoDBRepo) itemToSeat(item map[string]types.AttributeValue) Seat {
 		Status:    item["status"].(*types.AttributeValueMemberS).Value,
 		CreatedAt: createdAt,
 	}
+}
+
+func (r *DynamoDBRepo) ResetInventory(ctx context.Context) error {
+	// Scan and delete all items from seats table (DynamoDB doesn't support truncate, so we scan and delete)
+	var requests []types.WriteRequest
+
+	var lastEvaluatedKey map[string]types.AttributeValue
+	input := &dynamodb.ScanInput{
+		TableName:         aws.String(r.seatsTable),
+		ExclusiveStartKey: lastEvaluatedKey,
+	}
+	for {
+		out, err := r.client.Scan(ctx, input)
+		if err != nil {
+			return fmt.Errorf("scanning seat: %w", err)
+		}
+
+		for _, item := range out.Items {
+			requests = append(requests, types.WriteRequest{
+				DeleteRequest: &types.DeleteRequest{
+					Key: map[string]types.AttributeValue{
+						"seat_id": &types.AttributeValueMemberS{Value: item["seat_id"].(*types.AttributeValueMemberS).Value},
+					},
+				},
+			})
+
+			if len(requests) == 25 {
+				_, err := r.client.BatchWriteItem(ctx, &dynamodb.BatchWriteItemInput{
+					RequestItems: map[string][]types.WriteRequest{
+						r.seatsTable: requests,
+					},
+				})
+				if err != nil {
+					return fmt.Errorf("batch deleting seats: %w", err)
+				}
+				requests = nil
+			}
+		}
+
+		lastEvaluatedKey = out.LastEvaluatedKey
+		input.ExclusiveStartKey = lastEvaluatedKey
+
+		if lastEvaluatedKey == nil {
+			break
+		}
+	}
+	// Delete any remaining items
+	if len(requests) > 0 {
+		_, err := r.client.BatchWriteItem(ctx, &dynamodb.BatchWriteItemInput{
+			RequestItems: map[string][]types.WriteRequest{
+				r.seatsTable: requests,
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("batch deleting seats: %w", err)
+		}
+		requests = nil
+	}
+
+	// Scan and delete all items from events table
+
+	lastEvaluatedKey = nil
+	input = &dynamodb.ScanInput{
+		TableName:         aws.String(r.eventsTable),
+		ExclusiveStartKey: lastEvaluatedKey,
+	}
+	for {
+		out, err := r.client.Scan(ctx, input)
+		if err != nil {
+			return fmt.Errorf("scanning event: %w", err)
+		}
+
+		for _, item := range out.Items {
+			requests = append(requests, types.WriteRequest{
+				DeleteRequest: &types.DeleteRequest{
+					Key: map[string]types.AttributeValue{
+						"event_id": &types.AttributeValueMemberS{Value: item["event_id"].(*types.AttributeValueMemberS).Value},
+					},
+				},
+			})
+
+			if len(requests) == 25 {
+				_, err := r.client.BatchWriteItem(ctx, &dynamodb.BatchWriteItemInput{
+					RequestItems: map[string][]types.WriteRequest{
+						r.eventsTable: requests,
+					},
+				})
+				if err != nil {
+					return fmt.Errorf("batch deleting events: %w", err)
+				}
+				requests = nil
+			}
+		}
+
+		lastEvaluatedKey = out.LastEvaluatedKey
+		input.ExclusiveStartKey = lastEvaluatedKey
+
+		if lastEvaluatedKey == nil {
+			break
+		}
+	}
+	// Delete any remaining items
+	if len(requests) > 0 {
+		_, err := r.client.BatchWriteItem(ctx, &dynamodb.BatchWriteItemInput{
+			RequestItems: map[string][]types.WriteRequest{
+				r.eventsTable: requests,
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("batch deleting events: %w", err)
+		}
+		requests = nil
+	}
+
+	// After clearing tables, reseed initial data
+	log.Println("Resetting DynamoDB inventory...")
+	return r.SeedData(ctx)
 }
 
 func (r *DynamoDBRepo) Close() error { return nil }

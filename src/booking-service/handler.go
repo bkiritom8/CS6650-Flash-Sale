@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"sync/atomic"
 	"time"
@@ -39,6 +40,8 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 		g.GET("/events/:event_id/bookings", h.ListBookings)
 		g.DELETE("/bookings/:booking_id", h.CancelBooking)
 		g.GET("/metrics", h.GetMetrics)
+		// For testing/demo purposes, an endpoint to reset all booking data (also calls inventory reset to keep in sync)
+		g.POST("/reset", h.resetBookings)
 	}
 }
 
@@ -151,4 +154,27 @@ func (h *Handler) notifyInventoryReserve(eventID, seatID string) {
 		return
 	}
 	defer resp.Body.Close()
+}
+
+func (h *Handler) resetBookings(c *gin.Context) {
+	if err := h.repo.ResetBookings(c.Request.Context()); err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{"RESET_FAILED", err.Error()})
+		return
+	}
+	log.Println("Booking data reset successfully")
+
+	// Also reset inventory to keep in sync
+	url := fmt.Sprintf("%s/api/v1/internal/events/reset", h.inventoryURL)
+	req, err := http.NewRequest(http.MethodPost, url, nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{"RESET_FAILED", err.Error()})
+		return
+	}
+	resp, err := h.httpClient.Do(req)
+	if err != nil || resp == nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{"RESET_FAILED", err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+	c.JSON(http.StatusOK, gin.H{"status": "booking and inventory reset"})
 }

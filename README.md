@@ -326,6 +326,7 @@ curl http://$ALB/queue/health
 | GET | `/api/v1/events/:event_id/bookings` | List bookings for event |
 | DELETE | `/api/v1/bookings/:booking_id` | Cancel booking |
 | GET | `/api/v1/metrics?event_id=` | Live metrics (oversells, bookings/sec, lock_mode) |
+| POST | `/api/v1/reset` | Reset all booking data (also resets inventory) |
 
 ### Queue Service — `http://<ALB>/queue`
 

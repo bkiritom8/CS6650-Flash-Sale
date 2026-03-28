@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -30,6 +31,8 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 		internal := g.Group("/internal")
 		internal.POST("/events/:event_id/seats/:seat_id/reserve", h.ReserveSeat)
 		internal.POST("/events/:event_id/seats/:seat_id/release", h.ReleaseSeat)
+		// For testing/demo purposes, an endpoint to reset all inventory data
+		internal.DELETE("/events/reset", h.ResetInventory)
 	}
 }
 
@@ -110,4 +113,13 @@ func (h *Handler) ReleaseSeat(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"event_id": eventID, "seat_id": seatID, "status": "available"})
+}
+
+func (h *Handler) ResetInventory(c *gin.Context) {
+	if err := h.repo.ResetInventory(c.Request.Context()); err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{"RESET_FAILED", err.Error()})
+		return
+	}
+	log.Println("Inventory data reset successfully")
+	c.JSON(http.StatusOK, gin.H{"status": "inventory reset"})
 }
