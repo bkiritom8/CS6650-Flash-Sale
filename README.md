@@ -14,22 +14,72 @@
 ## Repository Structure
 
 ```
-concert-ticket-platform/
+CS6650-Flash-Sale/
 ├── src/
 │   ├── inventory-service/     # Manages events and seats
+│   │   ├── Dockerfile
+│   │   ├── go.mod
+│   │   ├── main.go
+│   │   ├── handler.go
+│   │   ├── models.go
+│   │   ├── repository.go
+│   │   ├── mysql_repo.go
+│   │   └── dynamodb_repo.go
 │   ├── booking-service/       # Handles bookings + concurrency control
+│   │   ├── Dockerfile
+│   │   ├── go.mod
+│   │   ├── main.go
+│   │   ├── handler.go
+│   │   ├── models.go
+│   │   ├── repository.go
+│   │   ├── mysql_repo.go
+│   │   └── dynamodb_repo.go
 │   └── queue-service/         # Virtual waiting room
+│       ├── Dockerfile
+│       ├── go.mod
+│       ├── main.go
+│       ├── handler.go
+│       ├── models.go
+│       └── queue.go
 ├── experiments/
 │   └── experiment1/           # Experiment 1: locking strategy benchmarks
-│       ├── *.go               # Go service (MySQL / DynamoDB / MongoDB backends)
-│       └── terraform/         # Self-contained infra (ECR, ECS, ALB rule, MongoDB EC2)
+│       ├── Dockerfile
+│       ├── go.mod
+│       ├── main.go
+│       ├── handler.go
+│       ├── models.go
+│       ├── runner.go
+│       ├── repository.go
+│       ├── mysql_repo.go
+│       ├── dynamodb_repo.go
+│       ├── test.py            # Locust test (alias entry point)
+│       ├── requirements.txt
+│       └── terraform/         # Self-contained infra (ECR, ECS, ALB rule)
+│           ├── main.tf
+│           ├── variables.tf
+│           ├── outputs.tf
+│           └── provider.tf
 ├── locust/
 │   └── experiment1/           # Locust load test (waiting-room pattern)
 │       ├── experiment1.py
 │       └── requirements.txt
 ├── terraform/
 │   ├── main/                  # Root platform config — run all Terraform from here
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   ├── outputs.tf
+│   │   └── provider.tf
 │   └── modules/               # alb, autoscaling, dynamodb, ecr, ecs, logging, network, rds
+│       ├── alb/
+│       ├── autoscaling/
+│       ├── dynamodb/
+│       ├── ecr/
+│       ├── ecs/
+│       ├── logging/
+│       ├── network/
+│       └── rds/
+├── results/                   # Saved benchmark CSV results
+│   └── exp1_<timestamp>.csv
 └── scripts/
     ├── deploy.sh              # Full platform deploy
     ├── cleanup.sh             # Tear down all platform resources
