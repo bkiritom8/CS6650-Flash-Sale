@@ -18,7 +18,6 @@ CS6650-Flash-Sale/
 ├── src/
 │   ├── inventory-service/     # Manages events and seats
 │   ├── booking-service/       # Handles bookings + concurrency control
-│   │                          # Supports per-request lock_mode and db_backend overrides
 │   └── queue-service/         # Virtual waiting room
 ├── experiments/
 │   └── experiment1/           # Exp 1: locking strategy benchmarks
@@ -28,7 +27,7 @@ CS6650-Flash-Sale/
 │   ├── main/                  # Root platform config — run all Terraform from here
 │   └── modules/               # alb, autoscaling, dynamodb, ecr, ecs, logging, network, rds
 ├── results/                   # Saved benchmark CSV + PNG results
-│   └── exp1_<timestamp>.csv
+│   └── Project Report.pdf
 └── scripts/
     ├── deploy.sh              # Full platform deploy
     ├── cleanup.sh             # Tear down all platform resources
