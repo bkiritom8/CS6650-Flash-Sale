@@ -13,14 +13,11 @@ import (
 )
 
 func main() {
-	backend  := os.Getenv("DB_BACKEND")
 	lockModeStr := os.Getenv("LOCK_MODE")
 	if lockModeStr == "" {
-		lockModeStr = "pessimistic" // safe default
+		lockModeStr = "pessimistic"
 	}
 	inventoryURL := os.Getenv("INVENTORY_SERVICE_URL")
-
-	log.Printf("booking-service starting, backend=%s lock_mode=%s", backend, lockModeStr)
 
 	var lockMode LockMode
 	switch lockModeStr {
@@ -34,38 +31,60 @@ func main() {
 		log.Fatalf("unknown LOCK_MODE=%q, must be none|optimistic|pessimistic", lockModeStr)
 	}
 
-	var repo Repository
-	var err error
+	// Init both repos if configured — experiment1 switches backends per request.
+	var mysqlRepo, dynamoRepo Repository
 
-	switch backend {
-	case "mysql":
-		repo, err = NewMySQLRepo(
+	if os.Getenv("MYSQL_HOST") != "" {
+		var err error
+		mysqlRepo, err = NewMySQLRepo(
 			os.Getenv("MYSQL_HOST"),
-			os.Getenv("MYSQL_PORT"),
-			os.Getenv("MYSQL_USER"),
+			getEnv("MYSQL_PORT", "3306"),
+			getEnv("MYSQL_USER", "admin"),
 			os.Getenv("MYSQL_PASSWORD"),
-			os.Getenv("MYSQL_DB"),
+			getEnv("MYSQL_DB", "concertdb"),
 		)
-	case "dynamodb":
-		repo, err = NewDynamoDBRepo(
-			os.Getenv("AWS_REGION"),
+		if err != nil {
+			log.Fatalf("init MySQL repo: %v", err)
+		}
+		defer mysqlRepo.Close()
+		log.Printf("MySQL backend ready: %s", os.Getenv("MYSQL_HOST"))
+	}
+
+	if os.Getenv("DYNAMODB_BOOKINGS_TABLE") != "" {
+		var err error
+		dynamoRepo, err = NewDynamoDBRepo(
+			getEnv("AWS_REGION", "us-east-1"),
 			os.Getenv("DYNAMODB_BOOKINGS_TABLE"),
 			os.Getenv("DYNAMODB_VERSIONS_TABLE"),
 			os.Getenv("DYNAMODB_OVERSELLS_TABLE"),
 		)
-	default:
-		log.Fatalf("unknown DB_BACKEND=%q, must be 'mysql' or 'dynamodb'", backend)
+		if err != nil {
+			log.Fatalf("init DynamoDB repo: %v", err)
+		}
+		defer dynamoRepo.Close()
+		log.Printf("DynamoDB backend ready")
 	}
-	if err != nil {
-		log.Fatalf("init repo: %v", err)
+
+	if mysqlRepo == nil && dynamoRepo == nil {
+		log.Fatal("no DB backend configured — set MYSQL_HOST or DYNAMODB_BOOKINGS_TABLE")
 	}
-	defer repo.Close()
+
+	// Default backend: prefer explicit DB_BACKEND env, otherwise whichever is configured.
+	defaultBackend := os.Getenv("DB_BACKEND")
+	if defaultBackend == "" {
+		if mysqlRepo != nil {
+			defaultBackend = "mysql"
+		} else {
+			defaultBackend = "dynamodb"
+		}
+	}
+	log.Printf("booking-service starting, default_backend=%s lock_mode=%s", defaultBackend, lockModeStr)
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())
 
-	h := NewHandler(repo, lockMode, inventoryURL)
+	h := NewHandler(mysqlRepo, dynamoRepo, defaultBackend, lockMode, inventoryURL)
 	h.RegisterRoutes(r)
 
 	srv := &http.Server{
@@ -91,4 +110,11 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(ctx)
+}
+
+func getEnv(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }

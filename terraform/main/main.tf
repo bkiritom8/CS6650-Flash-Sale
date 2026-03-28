@@ -69,9 +69,14 @@ module "alb" {
 }
 
 # ── Docker builds & ECR pushes ────────────────────────────────────────────────
+# platform = linux/amd64 ensures images built on Apple Silicon or ARM hosts
+# are compatible with ECS Fargate (x86_64).
 resource "docker_image" "inventory" {
   name = "${module.ecr_inventory.repository_url}:latest"
-  build { context = "../../src/inventory-service" }
+  build {
+    context  = "../../src/inventory-service"
+    platform = "linux/amd64"
+  }
 }
 resource "docker_registry_image" "inventory" {
   name          = docker_image.inventory.name
@@ -80,7 +85,10 @@ resource "docker_registry_image" "inventory" {
 
 resource "docker_image" "booking" {
   name = "${module.ecr_booking.repository_url}:latest"
-  build { context = "../../src/booking-service" }
+  build {
+    context  = "../../src/booking-service"
+    platform = "linux/amd64"
+  }
 }
 resource "docker_registry_image" "booking" {
   name          = docker_image.booking.name
@@ -89,7 +97,10 @@ resource "docker_registry_image" "booking" {
 
 resource "docker_image" "queue" {
   name = "${module.ecr_queue.repository_url}:latest"
-  build { context = "../../src/queue-service" }
+  build {
+    context  = "../../src/queue-service"
+    platform = "linux/amd64"
+  }
 }
 resource "docker_registry_image" "queue" {
   name          = docker_image.queue.name
