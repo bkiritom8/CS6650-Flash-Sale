@@ -37,5 +37,8 @@ type Repository interface {
 	// Metrics helpers
 	CountOversells(ctx context.Context, eventID string) (int, error)
 
+	// Cleanup method for testing — drops all data and recreates tables.
+	ResetBookings(ctx context.Context) error
+
 	Close() error
 }

@@ -30,3 +30,6 @@ dist/
 
 # OS
 .DS_Store
+
+# Locust
+**/__pycache__/
