@@ -236,6 +236,60 @@ done
 
 echo ""
 echo "  Results saved to: ${OUT_CSV}"
+
+# ── Generate PNG visualisation ─────────────────────────────────────────────────
+OUT_PNG="${OUT_CSV%.csv}.png"
+$PY - "${OUT_CSV}" "${OUT_PNG}" "${CONCURRENCY}" <<'PYEOF' 2>/dev/null && echo "  Chart saved to:   ${OUT_PNG}" || echo "  (chart generation skipped — pip install matplotlib to enable)"
+import sys, csv
+import matplotlib.pyplot as plt
+import numpy as np
+
+csv_path, png_path, concurrency = sys.argv[1], sys.argv[2], int(sys.argv[3])
+
+data = []
+with open(csv_path) as f:
+    for row in csv.DictReader(f):
+        data.append(row)
+
+labels    = [f"{r['backend']}\n{r['lock_mode']}" for r in data]
+legit     = [int(r['legitimate'])  for r in data]
+oversells = [int(r['oversells'])   for r in data]
+failed    = [int(r['failed'])      for r in data]
+p50 = [int(r['p50_ms']) if r.get('p50_ms','') not in ('-','') else 0 for r in data]
+p95 = [int(r['p95_ms']) if r.get('p95_ms','') not in ('-','') else 0 for r in data]
+p99 = [int(r['p99_ms']) if r.get('p99_ms','') not in ('-','') else 0 for r in data]
+
+x = np.arange(len(labels))
+fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+fig.suptitle(f"Experiment 1 — Locking Strategy Benchmark ({concurrency} users, 1 seat)", fontsize=14, fontweight='bold')
+
+ax = axes[0]
+ax.bar(x, legit,     0.55, label='Legitimate booking',           color='#2ecc71')
+ax.bar(x, oversells, 0.55, bottom=legit, label='Oversells',      color='#e74c3c')
+ax.bar(x, failed,    0.55, bottom=[l+o for l,o in zip(legit,oversells)], label='Failed (never reached DB)', color='#bdc3c7')
+ax.axhline(concurrency, color='black', linewidth=0.8, linestyle='--', label=f'Total users ({concurrency})')
+ax.set_title("Booking Outcomes per Strategy")
+ax.set_ylabel("Requests")
+ax.set_xticks(x); ax.set_xticklabels(labels, fontsize=9)
+ax.legend(fontsize=8); ax.set_ylim(0, concurrency * 1.1)
+for i, (l, o) in enumerate(zip(legit, oversells)):
+    if o > 0:
+        ax.text(i, l + o/2, str(o), ha='center', va='center', fontsize=7, color='white', fontweight='bold')
+
+ax2 = axes[1]
+w = 0.2
+ax2.bar(x - w, p50, w, label='p50', color='#3498db')
+ax2.bar(x,     p95, w, label='p95', color='#e67e22')
+ax2.bar(x + w, p99, w, label='p99', color='#9b59b6')
+ax2.set_title("Latency by Strategy (ms)")
+ax2.set_ylabel("Latency (ms)")
+ax2.set_xticks(x); ax2.set_xticklabels(labels, fontsize=9)
+ax2.legend(fontsize=8)
+
+plt.tight_layout()
+plt.savefig(png_path, dpi=150, bbox_inches='tight')
+PYEOF
+
 echo ""
 
 if [ $FAIL -gt 0 ]; then
