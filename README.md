@@ -27,15 +27,12 @@ CS6650-Flash-Sale/
 ├── terraform/
 │   ├── main/                  # Root platform config — run all Terraform from here
 │   └── modules/               # alb, autoscaling, dynamodb, ecr, ecs, logging, network, rds
-├── results/                   # Saved benchmark CSV results
+├── results/                   # Saved benchmark CSV + PNG results
 │   └── exp1_<timestamp>.csv
 └── scripts/
     ├── deploy.sh              # Full platform deploy
     ├── cleanup.sh             # Tear down all platform resources
     ├── test-platform.sh       # Smoke test all platform endpoints
-    ├── exp1-deploy.sh         # Deploy experiment1
-    ├── exp1-cleanup.sh        # Tear down experiment1 only
-    ├── exp1-test.sh           # Quick experiment1 correctness test
     └── exp1-locust-test.sh    # Full Locust benchmark (all backends × all lock modes)
 ```
 
@@ -104,13 +101,13 @@ Type `yes` when prompted. Scales down ECS, clears ECR images, then runs `terrafo
 
 **What it tests:** Three locking strategies (none / optimistic / pessimistic) against two storage backends (MySQL/RDS and DynamoDB), with all users simultaneously rushing the last available seat.
 
-**Architecture:** Separate ECS Fargate service that drives the existing booking-service API — no duplicate DB code. The booking-service accepts `lock_mode` and `db_backend` per request so all 6 combinations can be tested in a single run.
+**Architecture:** Locust runs locally and hits the main booking-service on ECS directly — no separate experiment service. The booking-service accepts `lock_mode` and `db_backend` per request so all 6 combinations can be tested in a single run.
 
 #### Deploy
 
 ```bash
-# Deploy main platform first, then:
-bash scripts/exp1-deploy.sh
+# Deploy the main platform — experiment1 runs on top of it
+bash scripts/deploy.sh
 ```
 
 #### Run the full Locust benchmark
@@ -141,39 +138,10 @@ Results are saved to `results/exp1_<timestamp>.csv` after each run.
 
 > **Note on concurrency:** Keep `CONCURRENCY` at or below 5,000 — the Fargate task is 512 CPU / 1 GB RAM and will OOM above that.
 
-#### Run a single experiment via API
-
-```bash
-ALB=$(cd terraform/main && terraform output -raw alb_dns_name)
-
-curl -s -X POST http://$ALB/experiment1/api/v1/run \
-  -H "Content-Type: application/json" \
-  -d '{"lock_mode":"pessimistic","db_backend":"mysql","concurrency":1000}' | jq .
-```
-
-**Response fields:**
-
-| Field | Description |
-|---|---|
-| `successful_bookings` | Bookings confirmed by the booking service |
-| `failed_bookings` | Requests that got a conflict / retry-exhausted error |
-| `oversell_count` | DB-verified double-bookings (should be 0 for optimistic/pessimistic) |
-| `oversell_rate_pct` | `oversell_count / concurrency × 100` |
-| `total_duration_ms` | Wall time from first goroutine start to last finish |
-| `latency_ms.min/max/mean/p99` | Per-attempt latency across all goroutines |
-
-#### Tear down experiment1
-
-```bash
-bash scripts/exp1-cleanup.sh
-```
-
-Scales ECS to 0, clears ECR images, then runs `terraform destroy`. Main platform is untouched.
-
 #### CloudWatch logs
 
 ```bash
-aws logs tail /ecs/concert-platform-experiment1 --follow --region us-east-1
+aws logs tail /ecs/concert-platform-booking --follow --region us-east-1
 ```
 
 ---
@@ -285,20 +253,15 @@ watch -n 5 'aws ecs describe-services \
   --query "services[0].runningCount"'
 
 # Tail CloudWatch logs
-aws logs tail /ecs/concert-platform-inventory   --follow --region us-east-1
-aws logs tail /ecs/concert-platform-booking     --follow --region us-east-1
-aws logs tail /ecs/concert-platform-queue       --follow --region us-east-1
-aws logs tail /ecs/concert-platform-experiment1 --follow --region us-east-1
+aws logs tail /ecs/concert-platform-inventory --follow --region us-east-1
+aws logs tail /ecs/concert-platform-booking   --follow --region us-east-1
+aws logs tail /ecs/concert-platform-queue     --follow --region us-east-1
 
 # Health checks
 ALB=$(cd terraform/main && terraform output -raw alb_dns_name)
 curl http://$ALB/inventory/health
 curl http://$ALB/booking/health
 curl http://$ALB/queue/health
-curl http://$ALB/experiment1/health
-
-# experiment1 Terraform outputs
-cd experiments/experiment1/terraform && terraform output
 ```
 
 ---
@@ -338,17 +301,6 @@ cd experiments/experiment1/terraform && terraform output
 | GET | `/api/v1/queue/event/:event_id/metrics` | Single event queue metrics |
 | POST | `/api/v1/queue/event/:event_id/admission-rate` | Change rate `{"rate":20}` |
 | POST | `/api/v1/queue/event/:event_id/fairness-mode` | Change mode `{"mode":"collapse"}` |
-
-### Experiment 1 Service — `http://<ALB>/experiment1`
-
-| Method | Path | Description |
-|---|---|---|
-| GET | `/health` | Health check |
-| POST | `/api/v1/run` | Batch run `{"lock_mode","db_backend","concurrency","max_retries"}` |
-| POST | `/api/v1/seat/init` | No-op — seat auto-initialises on first write |
-| POST | `/api/v1/seat/book` | Single booking attempt `{"event_id","seat_id","booking_id","lock_mode","db_backend"}` |
-| GET | `/api/v1/seat/results` | Get booking/oversell counts `?event_id=&seat_id=&db_backend=` |
-| DELETE | `/api/v1/seat` | Cleanup seat data `?event_id=&seat_id=&db_backend=` |
 
 ---
 

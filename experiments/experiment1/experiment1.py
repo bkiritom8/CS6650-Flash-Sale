@@ -8,23 +8,25 @@ write contention — simulating a real flash sale.
 Lock mode and DB backend are passed per-request so all three strategies
 can be tested back-to-back without redeploying.
 
-Usage (via locust/experiment1/test.sh):
-    locust -f experiment1.py \\
-        --host http://<ALB>/experiment1 \\
-        --headless \\
-        --users 100000 --spawn-rate 10000 \\
-        --run-time 60s \\
-        --lock-mode none \\
-        --db-backend mysql \\
-        --event-id exp1-abcd1234 \\
+Targets the main booking-service directly (no separate experiment service).
+
+Usage:
+    locust -f experiment1.py \
+        --host http://<ALB> \
+        --headless \
+        --users 1000 --spawn-rate 1000 \
+        --run-time 60s \
+        --lock-mode none \
+        --db-backend mysql \
+        --event-id exp1-abcd1234 \
         --seat-id seat-last
 """
 import uuid
 import threading
 from locust import HttpUser, task, constant, events
 
-_init_done    = threading.Event()   # set when test_start config is ready
-_spawn_complete = threading.Event() # set when all users have been spawned
+_init_done      = threading.Event()   # set when test_start config is ready
+_spawn_complete = threading.Event()   # set when all users have been spawned
 _cfg: dict = {}
 
 
@@ -33,7 +35,7 @@ def add_args(parser, **kwargs):
     parser.add_argument("--lock-mode",   default="none",      choices=["none", "optimistic", "pessimistic"])
     parser.add_argument("--db-backend",  default="mysql",     choices=["mysql", "dynamodb"])
     parser.add_argument("--max-retries", default=3,           type=int)
-    parser.add_argument("--event-id",    default="",          help="Pre-initialised event_id from test.sh")
+    parser.add_argument("--event-id",    default="",          help="event_id from the test script")
     parser.add_argument("--seat-id",     default="seat-last", help="Seat to contest")
 
 
@@ -64,24 +66,22 @@ class BookingUser(HttpUser):
          to book the same seat at the same instant — maximum contention.
 
     Expected per lock mode:
-      none        — nearly all 200s; booking_count >> 1 (oversells)
-      optimistic  — one 200, rest 409 after retries exhaust
-      pessimistic — one 200, rest immediate 409
+      none        — nearly all 200s; oversell_count >> 0 (race condition)
+      optimistic  — one 201, rest 409 after retries exhaust
+      pessimistic — one 201, rest immediate 409
     """
     wait_time = constant(9999)
 
     def on_start(self):
         _init_done.wait(timeout=30)
-        # ── Waiting room ──────────────────────────────────────────────────────
-        # Block here until every user has spawned, then all rush at once.
         _spawn_complete.wait(timeout=300)
-        # ─────────────────────────────────────────────────────────────────────
+
         with self.client.post(
-            "/api/v1/seat/book",
+            "/booking/api/v1/bookings",
             json={
                 "event_id":    _cfg["event_id"],
                 "seat_id":     _cfg["seat_id"],
-                "booking_id":  str(uuid.uuid4()),
+                "customer_id": str(uuid.uuid4()),
                 "lock_mode":   _cfg["lock_mode"],
                 "db_backend":  _cfg["db_backend"],
                 "max_retries": _cfg["max_retries"],
@@ -89,7 +89,7 @@ class BookingUser(HttpUser):
             catch_response=True,
             name="/seat/book",
         ) as resp:
-            if resp.status_code in (200, 409):
+            if resp.status_code in (200, 201, 409):
                 resp.success()
             else:
                 resp.failure(f"HTTP {resp.status_code}: {resp.text[:120]}")

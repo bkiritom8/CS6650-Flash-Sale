@@ -3,7 +3,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOCUST_FILE="${REPO_ROOT}/experiments/experiment1/experiment1.py"
-EXP_TF="${REPO_ROOT}/experiments/experiment1/terraform"
+MAIN_TF="${REPO_ROOT}/terraform/main"
 
 # ── Tunable parameters ─────────────────────────────────────────────────────────
 CONCURRENCY="${CONCURRENCY:-100000}"
@@ -28,15 +28,16 @@ if ! command -v locust &>/dev/null; then
     exit 1
 fi
 
-# ── Get experiment1 service URL ────────────────────────────────────────────────
-cd "${EXP_TF}"
-if ! terraform output experiment1_url > /dev/null 2>&1; then
+# ── Get booking service URL from main terraform ────────────────────────────────
+cd "${MAIN_TF}"
+if ! terraform output alb_dns_name > /dev/null 2>&1; then
     echo ""
-    echo "ERROR: Experiment 1 service is not deployed."
-    echo "Run: bash experiments/experiment1/scripts/deploy.sh"
+    echo "ERROR: Main platform is not deployed."
+    echo "Run: bash scripts/deploy.sh"
     exit 1
 fi
-EXP1_URL=$(terraform output -raw experiment1_url)
+ALB=$(terraform output -raw alb_dns_name)
+BOOKING_URL="http://${ALB}"
 
 ok()   { echo "  [PASS] $1"; PASS=$((PASS+1)); }
 fail() { echo "  [FAIL] $1"; FAIL=$((FAIL+1)); }
@@ -77,23 +78,9 @@ run_mode() {
 
     printf "  %-10s %-14s  event=%-18s " "${backend}" "${mode}" "${event_id}"
 
-    # 1. Init seat
-    if ! curl -sf -X POST "${EXP1_URL}/api/v1/seat/init" \
-        -H "Content-Type: application/json" \
-        -d "{\"event_id\":\"${event_id}\",\"seat_id\":\"${seat_id}\",\"db_backend\":\"${backend}\"}" \
-        > /dev/null 2>&1; then
-        echo "INIT FAILED"
-        fail "${backend}/${mode}: seat init failed"
-        RES_BACKEND+=("${backend}"); RES_MODE+=("${mode}")
-        RES_BOOKINGS+=("-"); RES_OVERSELLS+=("-")
-        RES_AVG+=("-"); RES_P50+=("-"); RES_P95+=("-"); RES_P99+=("-")
-        RES_STATUS+=("INIT_FAILED")
-        return
-    fi
-
-    # 2. Run Locust with CSV output for latency stats
+    # 1. Run Locust with CSV output for latency stats
     locust -f "${LOCUST_FILE}" \
-        --host        "${EXP1_URL}" \
+        --host        "${BOOKING_URL}" \
         --headless \
         --users       "${CONCURRENCY}" \
         --spawn-rate  "${SPAWN_RATE}" \
@@ -107,22 +94,23 @@ run_mode() {
         --loglevel    WARNING \
         2>/dev/null || true
 
-    # 3. Fetch ground-truth results from the server
-    result=$(curl -sf \
-        "${EXP1_URL}/api/v1/seat/results?event_id=${event_id}&seat_id=${seat_id}&db_backend=${backend}" \
-        || echo "{}")
-    bookings=$(echo  "$result" | $PY -c "import sys,json; print(json.load(sys.stdin).get('booking_count',  0))" 2>/dev/null || echo 0)
-    oversells=$(echo "$result" | $PY -c "import sys,json; print(json.load(sys.stdin).get('oversell_count', 0))" 2>/dev/null || echo 0)
+    # 2. Fetch ground-truth results from booking-service
+    bookings=$(curl -sf \
+        "${BOOKING_URL}/booking/api/v1/events/${event_id}/bookings" \
+        | $PY -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo 0)
+    oversells=$(curl -sf \
+        "${BOOKING_URL}/booking/api/v1/metrics?event_id=${event_id}&db_backend=${backend}" \
+        | $PY -c "import sys,json; print(json.load(sys.stdin).get('oversell_count', 0))" 2>/dev/null || echo 0)
 
-    # 4. Parse latency from CSV
+    # 3. Parse latency from CSV
     parse_latency "${csv_prefix}"
 
-    # 5. Cleanup
+    # 4. Cleanup
     curl -sf -X DELETE \
-        "${EXP1_URL}/api/v1/seat?event_id=${event_id}&seat_id=${seat_id}&db_backend=${backend}" \
+        "${BOOKING_URL}/booking/api/v1/internal/events/${event_id}/data?db_backend=${backend}" \
         > /dev/null 2>&1 || true
 
-    # 6. Correctness assertion
+    # 5. Correctness assertion
     local status
     case "${mode}" in
         none)
@@ -165,7 +153,7 @@ run_mode() {
 echo ""
 echo "=============================================================="
 echo "  Experiment 1 — Locking Strategy Benchmark"
-echo "  Service URL : ${EXP1_URL}"
+echo "  Booking URL : ${BOOKING_URL}"
 echo "  Backends    : ${BACKENDS}"
 echo "  Concurrency : ${CONCURRENCY} users  (CONCURRENCY=N to override)"
 echo "  Spawn rate  : ${SPAWN_RATE}/s        (SPAWN_RATE=N to override)"
@@ -176,9 +164,9 @@ echo "=============================================================="
 # ── [1] Health ─────────────────────────────────────────────────────────────────
 echo ""
 echo "--- [1] Health check"
-HTTP=$(curl -s -o /dev/null -w "%{http_code}" "${EXP1_URL}/health")
-if [ "$HTTP" = "200" ]; then ok "GET /health (HTTP 200)"
-else fail "GET /health (expected 200, got ${HTTP})"; fi
+HTTP=$(curl -s -o /dev/null -w "%{http_code}" "${BOOKING_URL}/booking/health")
+if [ "$HTTP" = "200" ]; then ok "GET /booking/health (HTTP 200)"
+else fail "GET /booking/health (expected 200, got ${HTTP})"; fi
 
 # ── [2-N] Run all backend × mode combinations ──────────────────────────────────
 IDX=2
@@ -214,8 +202,8 @@ echo "=============================================================="
 
 if [ $FAIL -gt 0 ]; then
     echo ""
-    echo "  Check experiment1 logs:"
-    echo "  aws logs tail /ecs/concert-platform-experiment1 --follow --region us-east-1"
+    echo "  Check booking-service logs:"
+    echo "  aws logs tail /ecs/concert-platform-booking --follow --region us-east-1"
     echo ""
 fi
 
@@ -285,7 +273,7 @@ ax1.set_xticks(x); ax1.set_xticklabels(labels, fontsize=8)
 ax1.legend(loc='upper right', fontsize=8, framealpha=0.9)
 for i, (l, o, fa) in enumerate(zip(legit, oversells, failed)):
     if l > 0:
-        ax1.text(i, np.sqrt(l) ** 2 * 0 + l, str(l), ha='center', va='bottom', fontsize=7, color='#27ae60', fontweight='bold')
+        ax1.text(i, l, str(l), ha='center', va='bottom', fontsize=7, color='#27ae60', fontweight='bold')
     if o > 0:
         ax1.text(i, l + o, str(o), ha='center', va='bottom', fontsize=7, color='#c0392b', fontweight='bold')
     if fa > 0:
