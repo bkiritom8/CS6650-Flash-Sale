@@ -1,7 +1,8 @@
 import time
 import itertools
 import uuid
-from locust import HttpUser, task, between, events, StopUser
+from locust import HttpUser, task, between, events
+from locust.exception import StopUser
 
 # ---------------------------------------------------------------------------
 # Config
@@ -29,7 +30,7 @@ def make_booking(client, event_id, seat_number, customer_id):
         "customer_id": customer_id,
     }
     with client.post(
-        "/api/v1/bookings",
+        "/booking/api/v1/bookings",
         json=payload,
         catch_response=True
     ) as resp:
@@ -51,7 +52,7 @@ class DirectBookingUser(HttpUser):
         #customer_id = str(uuid.uuid4())
         customer_id = 100 + seat_number
         make_booking(self.client, EVENT_ID, seat_number, customer_id)
-        raise StopUser()  # each user only makes one booking attempt
+        raise StopUser()  # one booking per user instance, then stop
 
 
 # ---------------------------------------------------------------------------
@@ -68,7 +69,7 @@ class QueuedBookingUser(HttpUser):
 
         # --- Phase 1: Enqueue ---
         with self.client.post(
-            "/api/v1/queue/join",
+            "/queue/api/v1/queue/join",
             json={"event_id": EVENT_ID, "customer_id": customer_id},
             catch_response=True
         ) as enqueue_resp:
@@ -97,7 +98,7 @@ class QueuedBookingUser(HttpUser):
 
             # Poll status endpoint
             status_resp = self.client.get(
-                f"/api/v1/queue/status/{queue_id}"
+                f"/queue/api/v1/queue/status/{queue_id}"
             )
             status = status_resp.json().get("status")
 
@@ -110,4 +111,4 @@ class QueuedBookingUser(HttpUser):
         # --- Phase 3: Book (only if admitted) ---
         if admitted:
             make_booking(self.client, EVENT_ID, seat_number, customer_id)
-        raise StopUser()  # each user only makes one booking attempt
+        raise StopUser()  # one booking per user instance, then stop
