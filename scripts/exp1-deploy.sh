@@ -2,7 +2,8 @@
 set -euo pipefail
 
 AWS_REGION="${AWS_REGION:-us-east-1}"
-EXP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+EXP_DIR="${ROOT_DIR}/experiments/experiment1"
 TF_DIR="${EXP_DIR}/terraform"
 
 echo "================================================"
@@ -17,7 +18,7 @@ aws sts get-caller-identity > /dev/null
 echo "    AWS credentials: OK"
 
 # Verify the main platform is deployed (experiment1 attaches to its infra)
-MAIN_TF="${EXP_DIR}/../../terraform/main"
+MAIN_TF="${ROOT_DIR}/terraform/main"
 if [ ! -f "${MAIN_TF}/terraform.tfstate" ] || \
    ! (cd "${MAIN_TF}" && terraform output alb_dns_name > /dev/null 2>&1); then
   echo ""

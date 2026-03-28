@@ -1,7 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-EXP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+EXP_DIR="${ROOT_DIR}/experiments/experiment1"
 TF_DIR="${EXP_DIR}/terraform"
 
 cd "${TF_DIR}"
@@ -47,7 +48,7 @@ run_test() {
     fi
 
     # 2. Run Locust — all users spawn simultaneously, each books once
-    locust -f "${EXP_DIR}/../../experiments/experiment1/test.py" \
+    locust -f "${ROOT_DIR}/locust/experiment1/experiment1.py" \
         --host "${EXP1_URL}" \
         --headless \
         --users "${CONCURRENCY}" \
@@ -59,6 +60,7 @@ run_test() {
         --seat-id "${seat_id}" \
         --loglevel WARNING \
         2>/dev/null || true
+
 
     # 3. Fetch ground-truth results from the server
     result=$(curl -sf \

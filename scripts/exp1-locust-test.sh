@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOCUST_FILE="${REPO_ROOT}/locust/experiment1/experiment1.py"
 EXP_TF="${REPO_ROOT}/experiments/experiment1/terraform"
 

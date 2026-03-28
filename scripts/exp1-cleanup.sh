@@ -1,7 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-EXP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+EXP_DIR="${ROOT_DIR}/experiments/experiment1"
 TF_DIR="${EXP_DIR}/terraform"
 
 SERVICE_NAME="concert-platform"
