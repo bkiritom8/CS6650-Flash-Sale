@@ -210,8 +210,29 @@ if [ $FAIL -gt 0 ]; then
     echo "  Check experiment1 logs:"
     echo "  aws logs tail /ecs/concert-platform-experiment1 --follow --region us-east-1"
     echo ""
+fi
+
+# ── Save results to CSV ────────────────────────────────────────────────────────
+RESULTS_DIR="${REPO_ROOT}/results"
+mkdir -p "${RESULTS_DIR}"
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+OUT_CSV="${RESULTS_DIR}/exp1_${TIMESTAMP}.csv"
+
+printf "backend,lock_mode,concurrency,bookings,oversells,avg_ms,p50_ms,p95_ms,p99_ms,status\n" > "${OUT_CSV}"
+for i in "${!RES_MODE[@]}"; do
+    printf "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n" \
+        "${RES_BACKEND[$i]}" "${RES_MODE[$i]}" "${CONCURRENCY}" \
+        "${RES_BOOKINGS[$i]}" "${RES_OVERSELLS[$i]}" \
+        "${RES_AVG[$i]}" "${RES_P50[$i]}" "${RES_P95[$i]}" "${RES_P99[$i]}" \
+        "${RES_STATUS[$i]}" >> "${OUT_CSV}"
+done
+
+echo ""
+echo "  Results saved to: ${OUT_CSV}"
+echo ""
+
+if [ $FAIL -gt 0 ]; then
     exit 1
 fi
 
-echo ""
 echo "All experiment 1 tests passed."
