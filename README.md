@@ -17,67 +17,25 @@
 CS6650-Flash-Sale/
 ├── src/
 │   ├── inventory-service/     # Manages events and seats
-│   │   ├── Dockerfile
-│   │   ├── go.mod
-│   │   ├── main.go
-│   │   ├── handler.go
-│   │   ├── models.go
-│   │   ├── repository.go
-│   │   ├── mysql_repo.go
-│   │   └── dynamodb_repo.go
 │   ├── booking-service/       # Handles bookings + concurrency control
-│   │   ├── Dockerfile
-│   │   ├── go.mod
-│   │   ├── main.go
-│   │   ├── handler.go
-│   │   ├── models.go
-│   │   ├── repository.go
-│   │   ├── mysql_repo.go
-│   │   └── dynamodb_repo.go
+│   │                          # Supports per-request lock_mode and db_backend overrides
 │   └── queue-service/         # Virtual waiting room
-│       ├── Dockerfile
-│       ├── go.mod
-│       ├── main.go
-│       ├── handler.go
-│       ├── models.go
-│       └── queue.go
 ├── experiments/
-│   └── experiment1/           # Experiment 1: locking strategy benchmarks
-│       ├── Dockerfile
-│       ├── go.mod
-│       ├── main.go
+│   └── experiment1/           # Exp 1: locking strategy benchmarks
+│       ├── main.go            # HTTP harness — calls booking-service API
+│       ├── runner.go          # Spawns goroutines, drives booking-service endpoints
 │       ├── handler.go
 │       ├── models.go
-│       ├── runner.go
-│       ├── repository.go
-│       ├── mysql_repo.go
-│       ├── dynamodb_repo.go
-│       ├── test.py            # Locust test (alias entry point)
-│       ├── requirements.txt
+│       ├── Dockerfile
+│       ├── go.mod
 │       └── terraform/         # Self-contained infra (ECR, ECS, ALB rule)
-│           ├── main.tf
-│           ├── variables.tf
-│           ├── outputs.tf
-│           └── provider.tf
 ├── locust/
 │   └── experiment1/           # Locust load test (waiting-room pattern)
 │       ├── experiment1.py
 │       └── requirements.txt
 ├── terraform/
 │   ├── main/                  # Root platform config — run all Terraform from here
-│   │   ├── main.tf
-│   │   ├── variables.tf
-│   │   ├── outputs.tf
-│   │   └── provider.tf
 │   └── modules/               # alb, autoscaling, dynamodb, ecr, ecs, logging, network, rds
-│       ├── alb/
-│       ├── autoscaling/
-│       ├── dynamodb/
-│       ├── ecr/
-│       ├── ecs/
-│       ├── logging/
-│       ├── network/
-│       └── rds/
 ├── results/                   # Saved benchmark CSV results
 │   └── exp1_<timestamp>.csv
 └── scripts/
@@ -96,13 +54,14 @@ CS6650-Flash-Sale/
 
 | Variable | Service | Values | Default |
 |---|---|---|---|
-| `DB_BACKEND` | inventory, booking | `mysql` \| `dynamodb` | `mysql` |
+| `DB_BACKEND` | booking | `mysql` \| `dynamodb` | `mysql` |
 | `LOCK_MODE` | booking | `none` \| `optimistic` \| `pessimistic` | `pessimistic` |
+| `BOOKING_SERVICE_URL` | experiment1 | URL to booking service | required |
 | `ADMISSION_RATE` | queue | integer (admissions/sec) | `10` |
 | `FAIRNESS_MODE` | queue | `collapse` \| `allow_multiple` | `allow_multiple` |
 | `AUTOSCALING_CPU_TARGET` | Terraform var | integer (%) | `70` |
 
-All are Terraform variables too — override in `terraform/main/variables.tf` or pass `-var` flags.
+> **Note:** `lock_mode` and `db_backend` can also be passed per-request in the booking service — experiment1 uses this to test all 6 combinations without redeploying.
 
 ---
 
@@ -122,7 +81,7 @@ bash scripts/deploy.sh
 ```
 
 This will:
-1. Run `go mod tidy` on all three services
+1. Run `go mod tidy` on all services
 2. Run `terraform init` and `terraform apply`
 3. Build all Docker images locally (`--platform linux/amd64`) and push to ECR
 4. Provision: VPC, NAT, ALB, RDS MySQL, DynamoDB (5 tables), ECS (3 services), CloudWatch
@@ -136,26 +95,6 @@ This will:
 bash scripts/test-platform.sh
 ```
 
-Runs a full smoke test — health checks, all endpoints, a real booking, a real queue join.
-
----
-
-## Switching Database Backend
-
-```bash
-cd terraform/main
-
-# Switch to DynamoDB
-terraform apply -auto-approve -var="db_backend=dynamodb"
-aws ecs wait services-stable \
-  --cluster concert-platform-booking-cluster \
-  --services concert-platform-booking \
-  --region us-east-1
-
-# Switch back to MySQL
-terraform apply -auto-approve -var="db_backend=mysql"
-```
-
 ---
 
 ## Tearing Down
@@ -164,7 +103,7 @@ terraform apply -auto-approve -var="db_backend=mysql"
 bash scripts/cleanup.sh
 ```
 
-Type `yes` when prompted. Scales down ECS, clears ECR images, terminates EC2 instances, then runs `terraform destroy`. Destroys everything — NAT Gateway, RDS, ECS, ECR, DynamoDB.
+Type `yes` when prompted. Scales down ECS, clears ECR images, then runs `terraform destroy`.
 
 ---
 
@@ -174,7 +113,7 @@ Type `yes` when prompted. Scales down ECS, clears ECR images, terminates EC2 ins
 
 **What it tests:** Three locking strategies (none / optimistic / pessimistic) against two storage backends (MySQL/RDS and DynamoDB), with all users simultaneously rushing the last available seat.
 
-**Architecture:** Separate ECS Fargate service + ECR repo + ALB rule, attaching to the main platform's VPC/ALB/RDS/DynamoDB.
+**Architecture:** Separate ECS Fargate service that drives the existing booking-service API — no duplicate DB code. The booking-service accepts `lock_mode` and `db_backend` per request so all 6 combinations can be tested in a single run.
 
 #### Deploy
 
@@ -189,34 +128,33 @@ bash scripts/exp1-deploy.sh
 # All 6 combinations: mysql×3 + dynamodb×3
 bash scripts/exp1-locust-test.sh
 
-# Override concurrency and run time
-CONCURRENCY=1000 RUN_TIME=30s bash scripts/exp1-locust-test.sh
+# Override concurrency
+CONCURRENCY=1000 bash scripts/exp1-locust-test.sh
 
-# Test a single backend
+# Single backend only
 BACKENDS="mysql" bash scripts/exp1-locust-test.sh
 ```
 
-The test uses a **waiting-room pattern**: all users spawn first, then rush the booking endpoint simultaneously to maximise contention.
+Results are saved to `results/exp1_<timestamp>.csv` after each run.
 
 **Expected results (1000 users):**
 
 | Backend | Lock Mode | Bookings | Oversells | Notes |
 |---|---|---|---|---|
-| MySQL | none | ~1000 | ~999 | Baseline — all writes go through |
-| MySQL | optimistic | 1 | 0 | CAS retry loop on version column |
+| MySQL | none | ~630 | ~630 | Baseline — race window causes oversells |
+| MySQL | optimistic | 1 | 0 | CAS retry on version column |
 | MySQL | pessimistic | 1 | 0 | `SELECT ... FOR UPDATE` |
 | DynamoDB | none | ~1000 | ~999 | Baseline |
 | DynamoDB | optimistic | 1 | 0 | Conditional UpdateItem on version |
-| DynamoDB | pessimistic | 1 | 0 | TransactWriteItems (atomic) |
+| DynamoDB | pessimistic | 1 | 0 | Conditional write with in-progress fence |
 
-> **Note on concurrency:** The default is 100,000 users. The Fargate task is 512 CPU / 1 GB RAM — keep `CONCURRENCY` at or below 5,000 to avoid OOM crashes mid-test.
+> **Note on concurrency:** Keep `CONCURRENCY` at or below 5,000 — the Fargate task is 512 CPU / 1 GB RAM and will OOM above that.
 
 #### Run a single experiment via API
 
 ```bash
 ALB=$(cd terraform/main && terraform output -raw alb_dns_name)
 
-# Batch runner — spawns goroutines internally
 curl -s -X POST http://$ALB/experiment1/api/v1/run \
   -H "Content-Type: application/json" \
   -d '{"lock_mode":"pessimistic","db_backend":"mysql","concurrency":1000}' | jq .
@@ -226,8 +164,8 @@ curl -s -X POST http://$ALB/experiment1/api/v1/run \
 
 | Field | Description |
 |---|---|
-| `successful_bookings` | Goroutines that wrote a booking |
-| `failed_bookings` | Goroutines that got a conflict / retry-exhausted error |
+| `successful_bookings` | Bookings confirmed by the booking service |
+| `failed_bookings` | Requests that got a conflict / retry-exhausted error |
 | `oversell_count` | DB-verified double-bookings (should be 0 for optimistic/pessimistic) |
 | `oversell_rate_pct` | `oversell_count / concurrency × 100` |
 | `total_duration_ms` | Wall time from first goroutine start to last finish |
@@ -239,7 +177,7 @@ curl -s -X POST http://$ALB/experiment1/api/v1/run \
 bash scripts/exp1-cleanup.sh
 ```
 
-Scales ECS to 0, terminates the MongoDB EC2 instance, then runs `terraform destroy`. Main platform is untouched.
+Scales ECS to 0, clears ECR images, then runs `terraform destroy`. Main platform is untouched.
 
 #### CloudWatch logs
 
@@ -356,9 +294,9 @@ watch -n 5 'aws ecs describe-services \
   --query "services[0].runningCount"'
 
 # Tail CloudWatch logs
-aws logs tail /ecs/concert-platform-inventory  --follow --region us-east-1
-aws logs tail /ecs/concert-platform-booking    --follow --region us-east-1
-aws logs tail /ecs/concert-platform-queue      --follow --region us-east-1
+aws logs tail /ecs/concert-platform-inventory   --follow --region us-east-1
+aws logs tail /ecs/concert-platform-booking     --follow --region us-east-1
+aws logs tail /ecs/concert-platform-queue       --follow --region us-east-1
 aws logs tail /ecs/concert-platform-experiment1 --follow --region us-east-1
 
 # Health checks
@@ -391,11 +329,12 @@ cd experiments/experiment1/terraform && terraform output
 | Method | Path | Description |
 |---|---|---|
 | GET | `/health` | Health check |
-| POST | `/api/v1/bookings` | Create booking `{"event_id","seat_id","customer_id"}` |
+| POST | `/api/v1/bookings` | Create booking `{"event_id","seat_id","customer_id","lock_mode","db_backend"}` |
 | GET | `/api/v1/bookings/:booking_id` | Get booking |
 | GET | `/api/v1/events/:event_id/bookings` | List bookings for event |
 | DELETE | `/api/v1/bookings/:booking_id` | Cancel booking |
-| GET | `/api/v1/metrics?event_id=` | Live metrics (oversells, bookings/sec, lock_mode) |
+| GET | `/api/v1/metrics?event_id=&db_backend=` | Live metrics (oversells, bookings/sec) |
+| DELETE | `/api/v1/internal/events/:event_id/data` | Cleanup test data for event |
 
 ### Queue Service — `http://<ALB>/queue`
 
@@ -415,7 +354,7 @@ cd experiments/experiment1/terraform && terraform output
 |---|---|---|
 | GET | `/health` | Health check |
 | POST | `/api/v1/run` | Batch run `{"lock_mode","db_backend","concurrency","max_retries"}` |
-| POST | `/api/v1/seat/init` | Init seat for Locust test `{"event_id","seat_id","db_backend"}` |
+| POST | `/api/v1/seat/init` | No-op — seat auto-initialises on first write |
 | POST | `/api/v1/seat/book` | Single booking attempt `{"event_id","seat_id","booking_id","lock_mode","db_backend"}` |
 | GET | `/api/v1/seat/results` | Get booking/oversell counts `?event_id=&seat_id=&db_backend=` |
 | DELETE | `/api/v1/seat` | Cleanup seat data `?event_id=&seat_id=&db_backend=` |
