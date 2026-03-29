@@ -102,7 +102,7 @@ run_mode() {
     # 2. Fetch ground-truth results from booking service
     local bookings oversells
     bookings=$(curl -sf \
-        "${BOOKING_URL}/booking/api/v1/events/${event_id}/bookings" \
+        "${BOOKING_URL}/booking/api/v1/events/${event_id}/bookings?db_backend=${backend}" \
         | $PY -c "import sys,json; print(len(json.load(sys.stdin)['bookings']))" 2>/dev/null || echo 0)
     oversells=$(curl -sf \
         "${BOOKING_URL}/booking/api/v1/metrics?event_id=${event_id}&db_backend=${backend}" \

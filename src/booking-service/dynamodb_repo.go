@@ -148,7 +148,22 @@ func (r *DynamoDBRepo) CheckAndReserveNoLock(ctx context.Context, eventID, seatI
 		}
 	}
 
-	return r.CreateBooking(ctx, b)
+	if err := r.CreateBooking(ctx, b); err != nil {
+		return err
+	}
+
+	// Best-effort: mark seat reserved so subsequent requests detect the oversell.
+	// No condition — intentionally racy, that's the point of no-lock mode.
+	_, _ = r.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName:                aws.String(r.versionsTable),
+		Key:                      vk,
+		UpdateExpression:         aws.String("SET #s = :reserved"),
+		ExpressionAttributeNames: map[string]string{"#s": "status"},
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":reserved": &types.AttributeValueMemberS{Value: "reserved"},
+		},
+	})
+	return nil
 }
 
 // ── Optimistic locking ────────────────────────────────────────────────────────
