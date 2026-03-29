@@ -84,6 +84,25 @@ bash scripts/test-platform.sh
 
 ---
 
+## Switching Database Backend
+
+To switch between MySQL and DynamoDB without redeploying from scratch:
+
+```bash
+cd terraform/main
+terraform apply -auto-approve -var="db_backend=dynamodb"
+# Wait for ECS to stabilise (~2-3 min)
+aws ecs wait services-stable \
+  --cluster concert-platform-booking-cluster \
+  --services concert-platform-booking \
+  --region us-east-1
+```
+
+Switch back:
+```bash
+terraform apply -auto-approve -var="db_backend=mysql"
+```
+
 ## Tearing Down
 
 ```bash
