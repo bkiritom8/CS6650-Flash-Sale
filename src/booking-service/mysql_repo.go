@@ -301,11 +301,14 @@ func (r *MySQLRepo) CheckAndReservePessimistic(ctx context.Context, eventID, sea
 // ── Metrics ───────────────────────────────────────────────────────────────────
 
 func (r *MySQLRepo) CountOversells(ctx context.Context, eventID string) (int, error) {
-	var count int
-	err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM oversell_events WHERE event_id=?`, eventID,
-	).Scan(&count)
-	return count, err
+    var count int
+    err := r.db.QueryRowContext(ctx,
+        `SELECT GREATEST(0, COUNT(*) - 1) 
+         FROM bookings 
+         WHERE event_id=? AND seat_id='seat-last' AND status='confirmed'`,
+        eventID,
+    ).Scan(&count)
+    return count, err
 }
 
 // ── Cleanup ───────────────────────────────────────────────────────────────────

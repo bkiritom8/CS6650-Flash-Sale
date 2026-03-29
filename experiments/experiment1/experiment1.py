@@ -81,7 +81,7 @@ class BookingUser(HttpUser):
             json={
                 "event_id":    _cfg["event_id"],
                 "seat_id":     _cfg["seat_id"],
-                "customer_id": str(uuid.uuid4()),
+                "customer_id": abs(hash(str(uuid.uuid4()))) % 100000,
                 "lock_mode":   _cfg["lock_mode"],
                 "db_backend":  _cfg["db_backend"],
                 "max_retries": _cfg["max_retries"],

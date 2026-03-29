@@ -43,7 +43,6 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 		g.GET("/events/:event_id/bookings", h.ListBookings)
 		g.DELETE("/bookings/:booking_id", h.CancelBooking)
 		g.GET("/metrics", h.GetMetrics)
-		// For testing/demo purposes, an endpoint to reset all booking data (also calls inventory reset to keep in sync)
 		g.POST("/reset", h.resetBookings)
 
 		internal := g.Group("/internal")
@@ -185,7 +184,6 @@ func (h *Handler) GetMetrics(c *gin.Context) {
 	})
 }
 
-// CleanupEventData deletes all test data for an event — used by experiment1 after each run.
 func (h *Handler) CleanupEventData(c *gin.Context) {
 	eventID := c.Param("event_id")
 	repo, err := h.repoFor(c.Query("db_backend"))
@@ -220,22 +218,13 @@ func (h *Handler) ReleaseSeat(c *gin.Context) {
 	})
 }
 
-func (h *Handler) notifyInventoryReserve(eventID, seatID string) {
-	url := fmt.Sprintf("%s/api/v1/internal/events/%s/seats/%s/reserve",
-		h.inventoryURL, eventID, seatID)
-	req, err := http.NewRequest(http.MethodPost, url, nil)
-	if err != nil {
-		return
-	}
-	resp, err := h.httpClient.Do(req)
-	if err != nil || resp == nil {
-		return
-	}
-	defer resp.Body.Close()
-}
-
 func (h *Handler) resetBookings(c *gin.Context) {
-	if err := h.repo.ResetBookings(c.Request.Context()); err != nil {
+	repo, err := h.repoFor("")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{"RESET_FAILED", err.Error()})
+		return
+	}
+	if err := repo.ResetBookings(c.Request.Context()); err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{"RESET_FAILED", err.Error()})
 		return
 	}
@@ -255,6 +244,8 @@ func (h *Handler) resetBookings(c *gin.Context) {
 	}
 	defer resp.Body.Close()
 	c.JSON(http.StatusOK, gin.H{"status": "booking and inventory reset"})
+}
+
 // repoFor returns the repo for the given backend string (empty = use default).
 func (h *Handler) repoFor(dbBackend string) (Repository, error) {
 	if dbBackend == "" {
@@ -274,4 +265,18 @@ func (h *Handler) repoFor(dbBackend string) (Repository, error) {
 	default:
 		return nil, fmt.Errorf("unknown db_backend %q", dbBackend)
 	}
+}
+
+func (h *Handler) notifyInventoryReserve(eventID, seatID string) {
+	url := fmt.Sprintf("%s/api/v1/internal/events/%s/seats/%s/reserve",
+		h.inventoryURL, eventID, seatID)
+	req, err := http.NewRequest(http.MethodPost, url, nil)
+	if err != nil {
+		return
+	}
+	resp, err := h.httpClient.Do(req)
+	if err != nil || resp == nil {
+		return
+	}
+	defer resp.Body.Close()
 }

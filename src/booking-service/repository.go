@@ -8,7 +8,6 @@ import "context"
 // so teammates can observe identical DB behaviour under different modes.
 type Repository interface {
 	// CreateBooking persists a new booking record.
-	// The caller is responsible for seat availability checks per lock mode.
 	CreateBooking(ctx context.Context, b *Booking) error
 
 	// GetBooking retrieves a single booking by ID.
@@ -19,8 +18,6 @@ type Repository interface {
 
 	// CancelBooking marks a booking as cancelled.
 	CancelBooking(ctx context.Context, bookingID string) error
-
-	// --- Locking primitives (MySQL only — DynamoDB uses conditional writes) ---
 
 	// CheckAndReserveNoLock attempts to book without any concurrency control.
 	// Used in LockNone mode — deliberately unsafe, for Experiment 1 baseline.
@@ -34,10 +31,10 @@ type Repository interface {
 	// Serialises access — correctness guaranteed, higher latency.
 	CheckAndReservePessimistic(ctx context.Context, eventID, seatID string, b *Booking) error
 
-	// Metrics helpers
+	// CountOversells returns the number of oversell events for an event.
 	CountOversells(ctx context.Context, eventID string) (int, error)
 
-	// Cleanup method for testing — drops all data and recreates tables.
+	// ResetBookings drops all booking data — used between experiment runs.
 	ResetBookings(ctx context.Context) error
 
 	Close() error
