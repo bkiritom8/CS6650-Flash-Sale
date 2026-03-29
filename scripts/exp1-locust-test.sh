@@ -102,7 +102,7 @@ run_mode() {
     # 2. Fetch ground-truth results from booking service
     local bookings oversells
     bookings=$(curl -sf \
-        "${BOOKING_URL}/booking/api/v1/events/${event_id}/bookings?db_backend=${backend}" \
+        "${BOOKING_URL}/booking/api/v1/events/${event_id}/bookings" \
         | $PY -c "import sys,json; print(len(json.load(sys.stdin)['bookings']))" 2>/dev/null || echo 0)
     oversells=$(curl -sf \
         "${BOOKING_URL}/booking/api/v1/metrics?event_id=${event_id}&db_backend=${backend}" \
@@ -163,6 +163,13 @@ run_mode() {
 
 # ── Banner ────────────────────────────────────────────────────────────────────
 echo ""
+echo "=============================================================="
+echo ""
+echo "  NOTE: 409 responses in this experiment mean the seat was"
+echo "  already booked — not a connectivity issue. Under no-lock"
+echo "  mode, 409s are expected to be near zero (oversells occur"
+echo "  instead). Under optimistic/pessimistic, all but one user"
+echo "  should receive 409 (seat taken)."
 echo "=============================================================="
 echo "  Experiment 1 — Locking Strategy Benchmark"
 echo "  Booking URL : ${BOOKING_URL}"

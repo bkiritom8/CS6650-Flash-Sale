@@ -192,8 +192,14 @@ echo "  Run time     : ${RUN_TIME}  (RUN_TIME=Xs to override)"
 echo "  Event        : ${EVENT_ID}"
 echo "  Queue poll   : every ${QUEUE_POLL_INTERVAL}s during queued tests"
 echo "=============================================================="
-
-# ── Health check ──────────────────────────────────────────────────────────────
+echo ""
+echo "  NOTE: 409 responses in this experiment are MySQL deadlocks"
+echo "  caused by multiple users booking different seats at the same"
+echo "  time under pessimistic locking. This is NOT a connectivity"
+echo "  issue — the server is healthy and responding correctly."
+echo "  The queued scenario should show significantly fewer 409s"
+echo "  since requests arrive at a controlled rate."
+echo "=============================================================="
 echo ""
 echo "--- [1] Health checks"
 for svc in inventory booking queue; do
