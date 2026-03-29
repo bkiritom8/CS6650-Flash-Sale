@@ -15,24 +15,82 @@
 
 ```
 CS6650-Flash-Sale/
-├── src/
-│   ├── inventory-service/     # Manages events and seats
-│   ├── booking-service/       # Handles bookings + concurrency control
-│   └── queue-service/         # Virtual waiting room
-├── experiments/
-│   └── experiment1/           # Exp 1: locking strategy benchmarks
-│       ├── experiment1.py     # Locust load test (waiting-room pattern)
-│       └── requirements.txt
-├── terraform/
-│   ├── main/                  # Root platform config — run all Terraform from here
-│   └── modules/               # alb, autoscaling, dynamodb, ecr, ecs, logging, network, rds
-├── results/                   # Saved benchmark CSV + PNG results
-│   └── Project Report.pdf
-└── scripts/
-    ├── deploy.sh              # Full platform deploy
-    ├── cleanup.sh             # Tear down all platform resources
-    ├── test-platform.sh       # Smoke test all platform endpoints
-    └── exp1-locust-test.sh    # Full Locust benchmark (all backends × all lock modes)
+│
+├── experiments/                        # Experiment scripts and load test files
+│   ├── experiment1/                    # Concurrency control under flash sale load
+│   │   ├── experiment1.py              # Locust load test — waiting-room spawn pattern
+│   │   ├── parse_stats.py              # Parses Locust CSV output for the test script
+│   │   ├── generate_chart.py           # Generates PNG results chart from CSV
+│   │   └── requirements.txt            # Python dependencies (locust)
+│   │
+│   └── experiment2/                    # Virtual queue as demand buffer
+│       ├── locustfile.py               # Locust load test — direct and queued scenarios
+│       └── parse_stats.py              # Parses Locust CSV output for the test script
+│
+├── powershell_scripts/                 # Windows PowerShell equivalents (for reference)
+│   ├── deploy.ps1
+│   ├── cleanup.ps1
+│   ├── exp2-locust-test.ps1
+│   └── test-platform.ps1
+│
+├── results/                            # Experiment results
+│
+├── scripts/                            # Main automation scripts (bash, cross-platform)
+│   ├── deploy.sh                       # Build images, push to ECR, provision all AWS infra
+│   ├── cleanup.sh                      # Tear down all AWS resources
+│   ├── test-platform.sh                # Smoke test — verifies all endpoints after deploy
+│   ├── exp1-locust-test.sh             # Run Experiment 1 (all lock modes x both backends)
+│   └── exp2-locust-test.sh             # Run Experiment 2 (direct vs queued x both backends)
+│
+├── src/                                # Go microservices
+│   ├── inventory-service/              # Manages events and seat availability
+│   │   ├── main.go
+│   │   ├── handler.go
+│   │   ├── repository.go               # Storage interface
+│   │   ├── mysql_repo.go               # MySQL implementation
+│   │   ├── dynamodb_repo.go            # DynamoDB implementation
+│   │   ├── models.go
+│   │   ├── Dockerfile
+│   │   └── go.mod
+│   │
+│   ├── booking-service/                # Handles bookings + concurrency control
+│   │   ├── main.go
+│   │   ├── handler.go
+│   │   ├── repository.go               # Storage interface
+│   │   ├── mysql_repo.go               # MySQL (no-lock, optimistic, pessimistic)
+│   │   ├── dynamodb_repo.go            # DynamoDB (conditional write locking)
+│   │   ├── models.go
+│   │   ├── Dockerfile
+│   │   └── go.mod
+│   │
+│   └── queue-service/                  # Virtual waiting room with admission rate control
+│       ├── main.go
+│       ├── handler.go
+│       ├── queue.go                    # In-memory queue with fairness mode support
+│       ├── models.go
+│       ├── Dockerfile
+│       └── go.mod
+│
+├── terraform/                          # Infrastructure as code (AWS, us-east-1)
+│   ├── main/                           # Root Terraform config — run all commands from here
+│   │   ├── main.tf                     # Wires all modules together
+│   │   ├── variables.tf                # All tunable parameters (backend, lock mode, etc.)
+│   │   ├── outputs.tf                  # ALB URL, table names, log groups
+│   │   └── provider.tf                 # AWS + Docker providers, ECR auth
+│   │
+│   └── modules/                        # Reusable Terraform modules
+│       ├── network/                    # VPC, subnets, NAT gateway, security groups
+│       ├── ecr/                        # ECR repositories (one per service)
+│       ├── ecs/                        # ECS Fargate cluster + service + task definition
+│       ├── rds/                        # RDS MySQL (db.t3.micro)
+│       ├── dynamodb/                   # DynamoDB tables (events, seats, bookings, versions)
+│       ├── alb/                        # ALB with path-based routing to all three services
+│       ├── autoscaling/                # CPU-based autoscaling for booking service
+│       └── logging/                    # CloudWatch log groups
+│
+├── .gitignore
+├── LICENSE
+└── README.md
 ```
 
 ---
@@ -184,7 +242,7 @@ aws logs tail /ecs/concert-platform-booking --follow --region us-east-1
 
 ```bash
 # Run both direct and queued scenarios, poll queue status every QUEUE_POLL_INTERVAL seconds during the queued scenarios
-bash scripts/exp1-locust-test.sh
+bash scripts/exp2-locust-test.sh
 ```
 
 **CloudWatch:** ECS CPU on booking-service — should be significantly lower in the queued scenario.
