@@ -3,6 +3,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOCUST_FILE="${REPO_ROOT}/experiments/experiment2/locustfile.py"
+PARSE_SCRIPT="${REPO_ROOT}/experiments/experiment2/parse_stats.py"
 MAIN_TF="${REPO_ROOT}/terraform/main"
 
 # ── Tunable parameters ────────────────────────────────────────────────────────
@@ -11,7 +12,7 @@ SPAWN_RATE="${SPAWN_RATE:-200}"
 RUN_TIME="${RUN_TIME:-120s}"
 EVENT_ID="${EVENT_ID:-evt-001}"
 BACKENDS="${BACKENDS:-mysql dynamodb}"
-QUEUE_POLL_INTERVAL="${QUEUE_POLL_INTERVAL:-5}"   # seconds between queue metric snapshots
+QUEUE_POLL_INTERVAL="${QUEUE_POLL_INTERVAL:-5}"
 
 # ── Directories — repo-local, works on all OS ─────────────────────────────────
 CSV_DIR="${REPO_ROOT}/.tmp/exp2_locust"
@@ -80,7 +81,6 @@ switch_backend() {
 }
 
 # ── Poll queue metrics in background, save snapshots ─────────────────────────
-# Writes one JSON line per poll to a file, stops when sentinel file is removed
 poll_queue_metrics() {
     local out_file=$1
     local sentinel=$2
@@ -98,37 +98,21 @@ poll_queue_metrics() {
 # ── Parse Locust CSV for summary stats ────────────────────────────────────────
 parse_locust_stats() {
     local csv_prefix=$1
-    local endpoint_name=$2
     local stats_file="${csv_prefix}_stats.csv"
     if [ ! -f "${stats_file}" ]; then
-        echo "- - - - -"
+        echo "- - - - - -"
         return
     fi
-    $PY - "${stats_file}" "${endpoint_name}" 2>/dev/null <<PYEOF || echo "- - - - -"
-import sys, csv
-path, name = sys.argv[1], sys.argv[2]
-with open(path, newline="", encoding="utf-8") as f:
-    for row in csv.DictReader(f):
-        if name in row.get("Name",""):
-            avg = round(float(row.get("Average Response Time",0) or 0))
-            p50 = row.get("50%","-") or "-"
-            p95 = row.get("95%","-") or "-"
-            p99 = row.get("99%","-") or "-"
-            reqs = row.get("Request Count","0") or "0"
-            fails = row.get("Failure Count","0") or "0"
-            print(avg, p50, p95, p99, reqs, fails)
-            break
-PYEOF
+    $PY "${PARSE_SCRIPT}" "${stats_file}" 2>/dev/null || echo "- - - - - -"
 }
 
 # ── Run one scenario (direct or queued) ──────────────────────────────────────
-# Args: backend scenario user_class csv_suffix endpoint_name
+# Args: backend scenario user_class csv_suffix
 run_scenario() {
     local backend=$1
     local scenario=$2
     local user_class=$3
     local csv_suffix=$4
-    local endpoint_name=$5
     local csv_prefix="${CSV_DIR}/${backend}_${csv_suffix}"
     local log_file="${LOG_DIR}/${backend}_${csv_suffix}.log"
     local queue_file="${CSV_DIR}/${backend}_${csv_suffix}_queue_metrics.jsonl"
@@ -164,7 +148,7 @@ run_scenario() {
 
     # Parse stats
     local stats
-    stats=$(parse_locust_stats "${csv_prefix}" "${endpoint_name}")
+    stats=$(parse_locust_stats "${csv_prefix}")
     local avg p50 p95 p99 reqs fails
     avg=$(echo "${stats}"  | cut -d' ' -f1)
     p50=$(echo "${stats}"  | cut -d' ' -f2)
@@ -232,18 +216,18 @@ for backend in ${BACKENDS}; do
 
     switch_backend "${backend}"
 
-    # Test 1: Direct booking (no queue)
+    # Test 1: Direct booking
     echo ""
     echo "--- [${IDX}] ${backend} / direct booking"
     reset_db
-    run_scenario "${backend}" "direct" "DirectBookingUser" "direct" "/booking/api/v1/bookings"
+    run_scenario "${backend}" "direct" "DirectBookingUser" "direct"
     IDX=$(( IDX + 1 ))
 
     # Test 2: Queued booking
     echo ""
     echo "--- [${IDX}] ${backend} / queued booking"
     reset_db
-    run_scenario "${backend}" "queued" "QueuedBookingUser" "queued" "/booking/api/v1/bookings"
+    run_scenario "${backend}" "queued" "QueuedBookingUser" "queued"
     IDX=$(( IDX + 1 ))
 done
 
@@ -257,7 +241,6 @@ printf "  %-10s %-8s %8s %8s %10s %8s %7s %7s %7s\n" \
 printf "  %-10s %-8s %8s %8s %10s %8s %7s %7s %7s\n" \
     "-------" "--------" "--------" "--------" "---------" "-------" "---" "---" "---"
 
-# Read summary CSV and print each row (skip header)
 tail -n +2 "${SUMMARY_CSV}" | while IFS=',' read -r backend scenario reqs fails sr avg p50 p95 p99 qfile; do
     printf "  %-10s %-8s %8s %8s %10s %8s %7s %7s %7s\n" \
         "${backend}" "${scenario}" "${reqs}" "${fails}" "${sr}" "${avg}" "${p50}" "${p95}" "${p99}"
