@@ -166,26 +166,26 @@ aws logs tail /ecs/concert-platform-booking --follow --region us-east-1
 
 ### Experiment 2 — Virtual Queue as Demand Buffer
 
-**What to test:** Compare direct booking load vs queue-buffered load on the booking service.
+**What it tests:** Compare direct booking load vs queue-buffered load on the booking service.
 
-**Without queue:**
-```
-POST http://<ALB>/booking/api/v1/bookings
-```
+**Architecture:** The queue service sits in front of the booking service as a virtual waiting room. It admits users at a fixed rate (default 10/sec) to smooth out spikes. The booking service is configured with `LOCK_MODE=pessimistic` and `FAIRNESS_MODE=allow_multiple` for this experiment. Requests made to the queue service will block until the user is admitted, then they can proceed to book. 
 
-**With queue:**
-```
-POST http://<ALB>/queue/api/v1/queue/join
-GET  http://<ALB>/queue/api/v1/queue/<queue_id>/status
-# Once status == "admitted" → book
-POST http://<ALB>/booking/api/v1/bookings
-```
+#### Run Locust test
+##### Tunable parameters:
 
-**What to measure:**
+| Variable | Service | Values | Default |
+|---|---|---|---|
+| `USERS` | both | integer | `500` |
+| `SPAWN_RATE` | both | integer | `200` |
+| `RUN_TIME` | both | time | `120s` |
+| `EVENT_ID` | both | event ID string | `evt-001` |
+| `BACKENDS` | both | `mysql` \| `dynamodb` | `mysql dynamodb` |
+| `QUEUE_POLL_INTERVAL` | queued | integer (seconds) | `5` |
+
 ```bash
-curl http://<ALB>/queue/api/v1/queue/evt-001/metrics
+# Run both direct and queued scenarios, poll queue status every QUEUE_POLL_INTERVAL seconds during the queued scenarios
+bash scripts/exp1-locust-test.sh
 ```
-Key fields: `queue_depth`, `total_admitted`, `admission_rate_hz`.
 
 **CloudWatch:** ECS CPU on booking-service — should be significantly lower in the queued scenario.
 
