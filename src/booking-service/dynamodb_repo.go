@@ -300,19 +300,29 @@ func (r *DynamoDBRepo) CheckAndReservePessimistic(ctx context.Context, eventID, 
 }
 
 func (r *DynamoDBRepo) CountOversells(ctx context.Context, eventID string) (int, error) {
+	// Mirror MySQL logic: oversells = confirmed bookings for this event - 1.
+	// The oversells table is unreliable under high concurrency (all requests read
+	// "available" before any write flips the status), so derive from booking count.
 	out, err := r.client.Query(ctx, &dynamodb.QueryInput{
-		TableName:              aws.String(r.oversellsTable),
+		TableName:              aws.String(r.bookingsTable),
 		IndexName:              aws.String("event_id-index"),
 		KeyConditionExpression: aws.String("event_id = :eid"),
+		FilterExpression:       aws.String("#s = :confirmed"),
+		ExpressionAttributeNames: map[string]string{"#s": "status"},
 		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":eid": &types.AttributeValueMemberS{Value: eventID},
+			":eid":       &types.AttributeValueMemberS{Value: eventID},
+			":confirmed": &types.AttributeValueMemberS{Value: "confirmed"},
 		},
 		Select: types.SelectCount,
 	})
 	if err != nil {
 		return 0, err
 	}
-	return int(out.Count), nil
+	count := int(out.Count) - 1
+	if count < 0 {
+		count = 0
+	}
+	return count, nil
 }
 
 func (r *DynamoDBRepo) versionKey(eventID, seatID string) map[string]types.AttributeValue {
