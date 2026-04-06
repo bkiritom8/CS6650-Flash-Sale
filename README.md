@@ -1,13 +1,17 @@
-# Concert Ticket Platform
+# Concert Ticket Booking Platform
+
+A distributed systems research project simulating a concert ticket flash sale backend. Five experiments study how architectural decisions affect system behavior under extreme load.
+
+---
 
 ## Prerequisites
 
 - Go 1.21+
 - Terraform 1.5+
 - Docker Desktop (must be running)
-- AWS CLI v2, configured with your student account credentials
-- Python 3 + `locust` (`pip install locust`)
-- `curl`, `jq`
+- AWS CLI v2 configured with student account credentials
+- Python 3 + Locust (`pip install locust`)
+- `curl`
 
 ---
 
@@ -23,9 +27,13 @@ CS6650-Flash-Sale/
 │   │   ├── generate_chart.py           # Generates PNG results chart from CSV
 │   │   └── requirements.txt            # Python dependencies (locust)
 │   │
-│   └── experiment2/                    # Virtual queue as demand buffer
-│       ├── locustfile.py               # Locust load test — direct and queued scenarios
-│       └── parse_stats.py              # Parses Locust CSV output for the test script
+│   ├── experiment2/                    # Virtual queue as demand buffer
+│   │   ├── locustfile.py               # Locust load test — direct and queued scenarios
+│   │   └── parse_stats.py              # Parses Locust CSV output for the test script
+│   │
+│   └── experiment4/                    # Multiple concurrent flash sales
+│       ├── locustfile.py               # Locust load test — 5 weighted user classes
+│       └── parse_stats.py              # Parses per-event stats from Locust CSV
 │
 ├── powershell_scripts/                 # Windows PowerShell equivalents (for reference)
 │   ├── deploy.ps1
@@ -33,14 +41,15 @@ CS6650-Flash-Sale/
 │   ├── exp2-locust-test.ps1
 │   └── test-platform.ps1
 │
-├── results/                            # Experiment results
+├── results/                            # Auto-generated experiment results (CSV + PNG)
 │
 ├── scripts/                            # Main automation scripts (bash, cross-platform)
 │   ├── deploy.sh                       # Build images, push to ECR, provision all AWS infra
 │   ├── cleanup.sh                      # Tear down all AWS resources
 │   ├── test-platform.sh                # Smoke test — verifies all endpoints after deploy
 │   ├── exp1-locust-test.sh             # Run Experiment 1 (all lock modes x both backends)
-│   └── exp2-locust-test.sh             # Run Experiment 2 (direct vs queued x both backends)
+│   ├── exp2-locust-test.sh             # Run Experiment 2 (direct vs queued x both backends)
+│   └── exp4-locust-test.sh             # Run Experiment 4 (5 events x 2 user counts x both backends)
 │
 ├── src/                                # Go microservices
 │   ├── inventory-service/              # Manages events and seat availability
@@ -95,22 +104,7 @@ CS6650-Flash-Sale/
 
 ---
 
-## Environment Variables
-
-| Variable | Service | Values | Default |
-|---|---|---|---|
-| `DB_BACKEND` | booking | `mysql` \| `dynamodb` | `mysql` |
-| `LOCK_MODE` | booking | `none` \| `optimistic` \| `pessimistic` | `pessimistic` |
-| `BOOKING_SERVICE_URL` | experiment1 | URL to booking service | required |
-| `ADMISSION_RATE` | queue | integer (admissions/sec) | `10` |
-| `FAIRNESS_MODE` | queue | `collapse` \| `allow_multiple` | `allow_multiple` |
-| `AUTOSCALING_CPU_TARGET` | Terraform var | integer (%) | `70` |
-
-> **Note:** `lock_mode` and `db_backend` can also be passed per-request in the booking service — experiment1 uses this to test all 6 combinations without redeploying.
-
----
-
-## Deploying the Platform
+## Quick Start
 
 ### Step 1 — Configure AWS credentials
 
@@ -119,55 +113,56 @@ export AWS_REGION=us-east-1
 aws sts get-caller-identity   # verify credentials work
 ```
 
-### Step 2 — Deploy everything
+### Step 2 — Make scripts executable (first time only, Mac/Linux)
 
 ```bash
-bash scripts/deploy.sh
+chmod +x scripts/deploy.sh scripts/cleanup.sh scripts/test-platform.sh \
+         scripts/exp1-locust-test.sh scripts/exp2-locust-test.sh \
+         scripts/exp4-locust-test.sh
 ```
 
-This will:
-1. Run `go mod tidy` on all services
-2. Run `terraform init` and `terraform apply`
-3. Build all Docker images locally (`--platform linux/amd64`) and push to ECR
-4. Provision: VPC, NAT, ALB, RDS MySQL, DynamoDB (5 tables), ECS (3 services), CloudWatch
-5. Wait for all health checks to pass
-
-**Expected time: 8–12 minutes** (RDS takes the longest)
-
-### Step 3 — Verify
+### Step 3 — Deploy
 
 ```bash
-bash scripts/test-platform.sh
+./scripts/deploy.sh
 ```
+
+This builds all Docker images (`--platform linux/amd64` — works on ARM Macs too), pushes to ECR, and provisions all AWS infrastructure. Expected time: 8-12 minutes on first run.
+
+### Step 4 — Verify
+
+```bash
+./scripts/test-platform.sh
+```
+
+### Step 5 — Tear down when done
+
+```bash
+./scripts/cleanup.sh
+```
+
+Always run this at the end of a session to stop RDS and NAT Gateway charges.
 
 ---
 
-## Switching Database Backend
+## Key Configuration
 
-To switch between MySQL and DynamoDB without redeploying from scratch:
+All experiment parameters are runtime configurable — no code changes needed.
 
+| Variable | Default | Description |
+|---|---|---|
+| `DB_BACKEND` | `mysql` | Storage backend: `mysql` or `dynamodb` |
+| `LOCK_MODE` | `pessimistic` | Booking concurrency: `none`, `optimistic`, `pessimistic` |
+| `ADMISSION_RATE` | `10` | Queue admissions per second |
+| `FAIRNESS_MODE` | `allow_multiple` | Queue fairness: `collapse` or `allow_multiple` |
+
+Switch backends without redeploying:
 ```bash
 cd terraform/main
 terraform apply -auto-approve -var="db_backend=dynamodb"
-# Wait for ECS to stabilise (~2-3 min)
-aws ecs wait services-stable \
-  --cluster concert-platform-booking-cluster \
-  --services concert-platform-booking \
-  --region us-east-1
 ```
 
-Switch back:
-```bash
-terraform apply -auto-approve -var="db_backend=mysql"
-```
-
-## Tearing Down
-
-```bash
-bash scripts/cleanup.sh
-```
-
-Type `yes` when prompted. Scales down ECS, clears ECR images, then runs `terraform destroy`.
+> **Note:** `lock_mode` and `db_backend` can also be passed per-request in the booking API — Experiment 1 uses this to test all 6 combinations in a single run without redeploying.
 
 ---
 
@@ -175,21 +170,17 @@ Type `yes` when prompted. Scales down ECS, clears ECR images, then runs `terrafo
 
 ### Experiment 1 — Concurrency Control Under Flash Sale Load
 
-**What it tests:** Three locking strategies (none / optimistic / pessimistic) against two storage backends (MySQL/RDS and DynamoDB), with all users simultaneously rushing the last available seat.
+Tests three locking strategies against both backends with all users simultaneously rushing the same seat.
 
-**Architecture:** Locust runs locally and hits the main booking-service on ECS directly — no separate experiment service. The booking-service accepts `lock_mode` and `db_backend` per request so all 6 combinations can be tested in a single run.
-
-#### Deploy
-
-```bash
-# Deploy the main platform — experiment1 runs on top of it
-bash scripts/deploy.sh
-```
-
-#### Run the full Locust benchmark
+| Variable | Default | Description |
+|---|---|---|
+| `CONCURRENCY` | `1000` | Number of concurrent users |
+| `SPAWN_RATE` | `1000` | Users spawned per second |
+| `RUN_TIME` | `120s` | Test duration |
+| `BACKENDS` | `mysql dynamodb` | Backends to test |
 
 ```bash
-# All 6 combinations: mysql×3 + dynamodb×3
+# Run all 6 combinations (mysql×3 + dynamodb×3)
 bash scripts/exp1-locust-test.sh
 
 # Override concurrency
@@ -199,118 +190,108 @@ CONCURRENCY=1000 bash scripts/exp1-locust-test.sh
 BACKENDS="mysql" bash scripts/exp1-locust-test.sh
 ```
 
-Results are saved to `results/exp1_<timestamp>.csv` after each run.
+Results saved to `results/exp1_<timestamp>.csv` and `.png`.
 
-**Expected results (1000 users):**
-
-| Backend | Lock Mode | Bookings | Oversells | Notes |
-|---|---|---|---|---|
-| MySQL | none | ~630 | ~630 | Baseline — race window causes oversells |
-| MySQL | optimistic | 1 | 0 | CAS retry on version column |
-| MySQL | pessimistic | 1 | 0 | `SELECT ... FOR UPDATE` |
-| DynamoDB | none | ~1000 | ~999 | Baseline |
-| DynamoDB | optimistic | 1 | 0 | Conditional UpdateItem on version |
-| DynamoDB | pessimistic | 1 | 0 | Conditional write with in-progress fence |
-
-> **Note on concurrency:** Keep `CONCURRENCY` at or below 5,000 — the Fargate task is 512 CPU / 1 GB RAM and will OOM above that.
-
-#### CloudWatch logs
-
-```bash
-aws logs tail /ecs/concert-platform-booking --follow --region us-east-1
-```
+**Note:** 409 responses mean seat taken — not a connectivity issue. Under no-lock mode, oversells occur instead. Under optimistic/pessimistic, all but one user gets 409.
 
 ---
 
 ### Experiment 2 — Virtual Queue as Demand Buffer
 
-**What it tests:** Compare direct booking load vs queue-buffered load on the booking service.
+Compares direct booking (unbuffered) versus queue-buffered booking under flash sale load, across both backends.
 
-**Architecture:** The queue service sits in front of the booking service as a virtual waiting room. It admits users at a fixed rate (default 10/sec) to smooth out spikes. The booking service is configured with `LOCK_MODE=pessimistic` and `FAIRNESS_MODE=allow_multiple` for this experiment. Requests made to the queue service will block until the user is admitted, then they can proceed to book. 
-
-#### Run Locust test
-##### Tunable parameters:
-
-| Variable | Service | Values | Default |
-|---|---|---|---|
-| `USERS` | both | integer | `500` |
-| `SPAWN_RATE` | both | integer | `200` |
-| `RUN_TIME` | both | time | `120s` |
-| `EVENT_ID` | both | event ID string | `evt-001` |
-| `BACKENDS` | both | `mysql` \| `dynamodb` | `mysql dynamodb` |
-| `QUEUE_POLL_INTERVAL` | queued | integer (seconds) | `5` |
+| Variable | Default | Description |
+|---|---|---|
+| `USERS` | `500` | Number of concurrent users |
+| `SPAWN_RATE` | `200` | Users spawned per second |
+| `RUN_TIME` | `120s` | Test duration |
+| `EVENT_ID` | `evt-001` | Event to target |
+| `BACKENDS` | `mysql dynamodb` | Backends to test |
+| `QUEUE_POLL_INTERVAL` | `5` | Seconds between queue status polls |
 
 ```bash
-# Run both direct and queued scenarios, poll queue status every QUEUE_POLL_INTERVAL seconds during the queued scenarios
 bash scripts/exp2-locust-test.sh
 ```
 
-**CloudWatch:** ECS CPU on booking-service — should be significantly lower in the queued scenario.
+Queue metrics are polled every 5 seconds during queued tests and saved to `.tmp/exp2_locust/*_queue_metrics.jsonl`.
+
+**Note:** 409 responses in this experiment are MySQL deadlocks from pessimistic locking under concurrent load — not failures. The queued scenario should produce significantly fewer 409s since requests arrive at a controlled rate.
 
 ---
 
 ### Experiment 3 — Auto Scaling Under Ticket Drop Load
 
+Vary CPU target thresholds and cooldown periods to find configurations that handle a sudden spike without over-provisioning.
+
 ```bash
 cd terraform/main
 
 # Aggressive scaling (triggers sooner)
-terraform apply -auto-approve \
-  -var="autoscaling_cpu_target=50" \
-  -var="lock_mode=pessimistic"
+terraform apply -auto-approve -var="autoscaling_cpu_target=50"
 
 # Conservative scaling
-terraform apply -auto-approve \
-  -var="autoscaling_cpu_target=90"
+terraform apply -auto-approve -var="autoscaling_cpu_target=90"
 ```
 
-**Load shape:** Near-zero → instant spike → sustained → drop-off. Use a Locust custom load shape class.
+Use a Locust custom `LoadTestShape` class to simulate the ticket drop load profile: near-zero traffic → instant spike → sustained peak → drop-off.
 
-**What to watch:** ECS Service → Tasks tab, CloudWatch ECS CPUUtilization, ALB Target Group healthy host count.
+Watch in AWS Console: ECS Service Tasks tab, CloudWatch ECS CPUUtilization, ALB Target Group healthy host count.
 
-**Runtime admission rate (no redeploy):**
+Change admission rate at runtime without redeploying:
 ```bash
 curl -X POST http://<ALB>/queue/api/v1/queue/event/evt-001/admission-rate \
-  -H "Content-Type: application/json" \
-  -d '{"rate": 50}'
+  -H "Content-Type: application/json" -d '{"rate": 50}'
 ```
 
 ---
 
 ### Experiment 4 — Multiple Concurrent Flash Sales
 
-Run simultaneous Locust workers targeting different events:
+Runs all 5 events simultaneously with weighted user distribution to test whether high load on one event bleeds into others.
 
-```
-evt-001  Taylor Swift    (1000 seats)
-evt-002  Coldplay        (500 seats)
-evt-003  The Weeknd      (200 seats)
-evt-004  Billie Eilish   (100 seats)
-evt-005  Drake           (2000 seats)
-```
+| Variable | Default | Description |
+|---|---|---|
+| `USERS_LOW` | `500` | Low concurrency run |
+| `USERS_HIGH` | `1000` | High concurrency run |
+| `SPAWN_RATE` | `50` | Users spawned per second |
+| `RUN_TIME` | `120s` | Test duration per run |
+| `BACKENDS` | `mysql dynamodb` | Backends to test |
 
-**What to measure:**
 ```bash
-curl http://<ALB>/booking/api/v1/events/evt-001/bookings
-curl http://<ALB>/booking/api/v1/metrics?event_id=evt-001
+# Run all 4 combinations (2 backends x 2 user counts)
+bash scripts/exp4-locust-test.sh
+
+# Override user counts
+USERS_LOW=500 USERS_HIGH=1000 bash scripts/exp4-locust-test.sh
 ```
+
+User distribution across events:
+| Event | Demand | Weight |
+|---|---|---|
+| evt-001 Taylor Swift | HIGH | ~40% of users |
+| evt-005 Drake | MODERATE | ~25% of users |
+| evt-002 Coldplay | | ~15% of users |
+| evt-003 The Weeknd | | ~12% of users |
+| evt-004 Billie Eilish | LOW | ~8% of users |
+
+**Key finding to look for:** Compare evt-004 p95 latency at 500 vs 1000 users. If it degrades more than evt-001, load is bleeding across event boundaries through shared infrastructure (MySQL connection pool or DynamoDB table throughput).
+
+Results saved to `results/exp4_<timestamp>.csv`.
 
 ---
 
 ### Experiment 5 — Multiple Requests from the Same User
 
-Toggle `FAIRNESS_MODE` at runtime — no redeploy needed.
+Toggle fairness mode at runtime — no redeploy needed.
 
 ```bash
 # Allow multiple queue slots per IP (higher throughput, less fair)
 curl -X POST http://<ALB>/queue/api/v1/queue/event/evt-001/fairness-mode \
-  -H "Content-Type: application/json" \
-  -d '{"mode": "allow_multiple"}'
+  -H "Content-Type: application/json" -d '{"mode": "allow_multiple"}'
 
 # Collapse to one slot per IP (fairer)
 curl -X POST http://<ALB>/queue/api/v1/queue/event/evt-001/fairness-mode \
-  -H "Content-Type: application/json" \
-  -d '{"mode": "collapse"}'
+  -H "Content-Type: application/json" -d '{"mode": "collapse"}'
 ```
 
 ---
@@ -333,7 +314,7 @@ aws logs tail /ecs/concert-platform-inventory --follow --region us-east-1
 aws logs tail /ecs/concert-platform-booking   --follow --region us-east-1
 aws logs tail /ecs/concert-platform-queue     --follow --region us-east-1
 
-# Health checks
+# Manual health checks
 ALB=$(cd terraform/main && terraform output -raw alb_dns_name)
 curl http://$ALB/inventory/health
 curl http://$ALB/booking/health
@@ -363,6 +344,7 @@ curl http://$ALB/queue/health
 | GET | `/api/v1/bookings/:booking_id` | Get booking |
 | GET | `/api/v1/events/:event_id/bookings` | List bookings for event |
 | DELETE | `/api/v1/bookings/:booking_id` | Cancel booking |
+| POST | `/api/v1/reset` | Reset all booking and inventory data |
 | GET | `/api/v1/metrics?event_id=&db_backend=` | Live metrics (oversells, bookings/sec) |
 | DELETE | `/api/v1/internal/events/:event_id/data` | Cleanup test data for event |
 

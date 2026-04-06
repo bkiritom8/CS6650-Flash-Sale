@@ -43,8 +43,8 @@ func NewMySQLRepo(host, port, user, pass, dbname string) (*MySQLRepo, error) {
 		return nil, fmt.Errorf("could not connect to MySQL: %w", err)
 	}
 
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(10)
+	db.SetMaxOpenConns(60)
+	db.SetMaxIdleConns(20)
 	db.SetConnMaxLifetime(5 * time.Minute)
 
 	repo := &MySQLRepo{db: db}
@@ -88,7 +88,6 @@ func (r *MySQLRepo) migrate() error {
 
 func (r *MySQLRepo) SeedData(ctx context.Context) error {
 	for _, e := range seedEvents {
-		// Skip if already seeded
 		var count int
 		_ = r.db.QueryRowContext(ctx, "SELECT COUNT(1) FROM events WHERE event_id=?", e.id).Scan(&count)
 		if count > 0 {
@@ -230,7 +229,6 @@ func (r *MySQLRepo) ReleaseSeat(ctx context.Context, eventID, seatID string) err
 }
 
 func (r *MySQLRepo) ResetInventory(ctx context.Context) error {
-	// For testing purposes - delete all seats and events and re-seed
 	stmts := []string{
 		`DROP TABLE IF EXISTS seats`,
 		`DROP TABLE IF EXISTS events`,

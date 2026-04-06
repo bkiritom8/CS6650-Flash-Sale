@@ -43,8 +43,8 @@ func NewMySQLRepo(host, port, user, pass, dbname string) (*MySQLRepo, error) {
 		return nil, fmt.Errorf("could not connect to MySQL: %w", err)
 	}
 
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(10)
+	db.SetMaxOpenConns(60)
+	db.SetMaxIdleConns(20)
 	db.SetConnMaxLifetime(5 * time.Minute)
 
 	repo := &MySQLRepo{db: db}
@@ -69,7 +69,6 @@ func (r *MySQLRepo) migrate() error {
 			INDEX idx_status (status)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
-		// Tracks every oversell event for Experiment 1 metrics
 		`CREATE TABLE IF NOT EXISTS oversell_events (
 			id         BIGINT       AUTO_INCREMENT PRIMARY KEY,
 			event_id   VARCHAR(36)  NOT NULL,
@@ -78,8 +77,6 @@ func (r *MySQLRepo) migrate() error {
 			INDEX idx_event (event_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
-		// Version table used by optimistic locking
-		// Each row tracks the booking version for a (event, seat) pair
 		`CREATE TABLE IF NOT EXISTS seat_versions (
 			event_id VARCHAR(36)  NOT NULL,
 			seat_id  VARCHAR(64)  NOT NULL,
@@ -95,8 +92,6 @@ func (r *MySQLRepo) migrate() error {
 	}
 	return nil
 }
-
-// ── Core booking ──────────────────────────────────────────────────────────────
 
 func (r *MySQLRepo) CreateBooking(ctx context.Context, b *Booking) error {
 	_, err := r.db.ExecContext(ctx,
@@ -147,20 +142,13 @@ func (r *MySQLRepo) CancelBooking(ctx context.Context, bookingID string) error {
 	return err
 }
 
-// ── No-lock mode ──────────────────────────────────────────────────────────────
-// Intentionally unsafe — reads availability then writes without holding a lock.
-// Race window between SELECT and INSERT causes oversells.
-// This is the Experiment 1 baseline — do NOT fix this behaviour.
-
 func (r *MySQLRepo) CheckAndReserveNoLock(ctx context.Context, eventID, seatID string, b *Booking) error {
-	// Check availability (no lock held)
 	var status string
 	err := r.db.QueryRowContext(ctx,
 		`SELECT status FROM seat_versions WHERE event_id=? AND seat_id=?`, eventID, seatID,
 	).Scan(&status)
 
 	if err == sql.ErrNoRows {
-		// First time seeing this seat — initialise
 		_, err = r.db.ExecContext(ctx,
 			`INSERT IGNORE INTO seat_versions (event_id,seat_id,version,status) VALUES (?,?,0,'available')`,
 			eventID, seatID,
@@ -174,20 +162,14 @@ func (r *MySQLRepo) CheckAndReserveNoLock(ctx context.Context, eventID, seatID s
 	}
 
 	if status != "available" {
-		// Record oversell — seat already taken but we proceed anyway (baseline)
 		_, _ = r.db.ExecContext(ctx,
 			`INSERT INTO oversell_events (event_id,seat_id,created_at) VALUES (?,?,?)`,
 			eventID, seatID, time.Now().UTC(),
 		)
 	}
 
-	// Write booking regardless — this is the unsafe path
 	return r.CreateBooking(ctx, b)
 }
-
-// ── Optimistic locking ────────────────────────────────────────────────────────
-// Read version → attempt write with version check → retry on mismatch.
-// No locks held during processing. Low latency, occasional retries under contention.
 
 func (r *MySQLRepo) CheckAndReserveOptimistic(ctx context.Context, eventID, seatID string, b *Booking, maxRetries int) error {
 	for attempt := 0; attempt <= maxRetries; attempt++ {
@@ -217,7 +199,6 @@ func (r *MySQLRepo) CheckAndReserveOptimistic(ctx context.Context, eventID, seat
 			return fmt.Errorf("seat %s is not available", seatID)
 		}
 
-		// Attempt update — only succeeds if version hasn't changed since we read it
 		res, err := r.db.ExecContext(ctx,
 			`UPDATE seat_versions SET status='reserved', version=version+1
 			 WHERE event_id=? AND seat_id=? AND version=? AND status='available'`,
@@ -229,20 +210,14 @@ func (r *MySQLRepo) CheckAndReserveOptimistic(ctx context.Context, eventID, seat
 
 		n, _ := res.RowsAffected()
 		if n > 0 {
-			// Version matched — we won the race, create the booking
 			return r.CreateBooking(ctx, b)
 		}
 
-		// Version changed — someone else booked concurrently, retry
 		log.Printf("optimistic conflict on seat %s (attempt %d/%d)", seatID, attempt+1, maxRetries)
-		time.Sleep(time.Duration(attempt*10) * time.Millisecond) // simple backoff
+		time.Sleep(time.Duration(attempt*10) * time.Millisecond)
 	}
 	return fmt.Errorf("seat %s: max retries exceeded under contention", seatID)
 }
-
-// ── Pessimistic locking ───────────────────────────────────────────────────────
-// Acquires SELECT ... FOR UPDATE — holds a row-level lock until transaction commits.
-// Guarantees zero oversells. Higher latency under load.
 
 func (r *MySQLRepo) CheckAndReservePessimistic(ctx context.Context, eventID, seatID string, b *Booking) error {
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
@@ -258,7 +233,6 @@ func (r *MySQLRepo) CheckAndReservePessimistic(ctx context.Context, eventID, sea
 	).Scan(&status)
 
 	if err == sql.ErrNoRows {
-		// Initialise under lock
 		_, err = tx.ExecContext(ctx,
 			`INSERT INTO seat_versions (event_id,seat_id,version,status) VALUES (?,?,0,'available')
 			 ON DUPLICATE KEY UPDATE seat_id=seat_id`,
@@ -276,7 +250,6 @@ func (r *MySQLRepo) CheckAndReservePessimistic(ctx context.Context, eventID, sea
 		return fmt.Errorf("seat %s is not available", seatID)
 	}
 
-	// Mark reserved while holding the lock
 	_, err = tx.ExecContext(ctx,
 		`UPDATE seat_versions SET status='reserved', version=version+1
 		 WHERE event_id=? AND seat_id=?`,
@@ -298,20 +271,16 @@ func (r *MySQLRepo) CheckAndReservePessimistic(ctx context.Context, eventID, sea
 	return tx.Commit()
 }
 
-// ── Metrics ───────────────────────────────────────────────────────────────────
-
 func (r *MySQLRepo) CountOversells(ctx context.Context, eventID string) (int, error) {
-    var count int
-    err := r.db.QueryRowContext(ctx,
-        `SELECT GREATEST(0, COUNT(*) - 1) 
-         FROM bookings 
-         WHERE event_id=? AND seat_id='seat-last' AND status='confirmed'`,
-        eventID,
-    ).Scan(&count)
-    return count, err
+	var count int
+	err := r.db.QueryRowContext(ctx,
+		`SELECT GREATEST(0, COUNT(*) - 1)
+		 FROM bookings
+		 WHERE event_id=? AND seat_id='seat-last' AND status='confirmed'`,
+		eventID,
+	).Scan(&count)
+	return count, err
 }
-
-// ── Cleanup ───────────────────────────────────────────────────────────────────
 
 func (r *MySQLRepo) ResetBookings(ctx context.Context) error {
 	stmts := []string{
