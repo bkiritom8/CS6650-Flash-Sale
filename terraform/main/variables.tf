@@ -60,6 +60,32 @@ variable "autoscaling_cpu_target" {
   default     = 70
 }
 
+variable "scaling_policy_type" { 
+  description = "Autoscaling policy, either 'target_tracking' or 'step'"
+  type = string
+  default = "target_tracking"}
+
+variable "scale_in_cooldown" { 
+  default = 300 }
+
+variable "scale_out_cooldown"{
+  default = 60 }
+
+variable "step_adjustments" {
+  description = "List of step bounds and scaling adjustments for step autoscaling"
+  type = list(object({
+    metric_interval_lower_bound = number
+    metric_interval_upper_bound = optional(number, null)
+    scaling_adjustment          = number
+  }))
+  default = []
+}
+
+variable "alarm_cpu_threshold" {
+  description = "Alarm threshold for CPU CloudWatch monitoring, for use with step autoscaling. Should be the same as autoscaling_cpu_target for testing purposes"
+  default = 70
+}
+
 # ── ECR repository names ───────────────────────────────────────────────────────
 
 variable "ecr_inventory_repo" {

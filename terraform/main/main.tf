@@ -207,6 +207,11 @@ module "autoscaling" {
   min_capacity = var.autoscaling_min
   max_capacity = var.autoscaling_max
   cpu_target   = var.autoscaling_cpu_target
+  scale_in_cooldown   = var.scale_in_cooldown
+  scale_out_cooldown  = var.scale_out_cooldown
+  scaling_policy_type = var.scaling_policy_type
+  step_adjustments    = var.step_adjustments
+  alarm_cpu_threshold = var.alarm_cpu_threshold
 
   depends_on = [module.ecs_booking]
 }
