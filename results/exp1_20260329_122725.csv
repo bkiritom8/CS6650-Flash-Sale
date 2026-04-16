@@ -1,0 +1,7 @@
+backend,lock_mode,concurrency,bookings,oversells,legitimate,failed,avg_ms,p50_ms,p95_ms,p99_ms,status
+mysql,none,1000,1000,999,1,0,1973,2100,3000,3100,PASS
+mysql,optimistic,1000,1,0,1,999,808,900,1100,1200,PASS
+mysql,pessimistic,1000,1,0,1,999,1075,1100,1700,1800,PASS
+dynamodb,none,1000,1000,0,1000,0,19400,20000,21000,22000,FAIL-expected-oversells
+dynamodb,optimistic,1000,1,0,1,999,8526,10000,11000,11000,PASS
+dynamodb,pessimistic,1000,1,0,1,999,13718,14000,15000,15000,PASS

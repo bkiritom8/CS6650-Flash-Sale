@@ -1,0 +1,5 @@
+backend,fairness_mode,endpoint,requests,failures,avg_ms,p50_ms,p95_ms,p99_ms,queue_metrics_file,greedy_joins
+mysql,allow_multiple,-,-,-,-,-,-,-,/Users/bhargav/Documents/CS6650-Flash-Sale/.tmp/exp5_locust/mysql_allow_multiple_queue_metrics.jsonl,3
+mysql,collapse,-,-,-,-,-,-,-,/Users/bhargav/Documents/CS6650-Flash-Sale/.tmp/exp5_locust/mysql_collapse_queue_metrics.jsonl,3
+dynamodb,allow_multiple,-,-,-,-,-,-,-,/Users/bhargav/Documents/CS6650-Flash-Sale/.tmp/exp5_locust/dynamodb_allow_multiple_queue_metrics.jsonl,3
+dynamodb,collapse,-,-,-,-,-,-,-,/Users/bhargav/Documents/CS6650-Flash-Sale/.tmp/exp5_locust/dynamodb_collapse_queue_metrics.jsonl,3
