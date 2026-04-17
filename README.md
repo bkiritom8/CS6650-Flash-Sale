@@ -135,7 +135,19 @@ This builds all Docker images (`--platform linux/amd64` — works on ARM Macs to
 ./scripts/test-platform.sh
 ```
 
-### Step 5 — Tear down when done
+### Step 5 — Run Dashboard (Frontend & Experiment Runner)
+
+```bash
+cd dashboard
+npm install       # first time only
+npm run dev:all
+```
+
+Open `http://localhost:5173` in your browser. 
+- The default view is the **Fan View**. 
+- To access the **Analytics** and built-in **Experiments** panels, click on the **Admin Control** tab and enter the password: `admin`.
+
+### Step 6 — Tear down when done
 
 ```bash
 ./scripts/cleanup.sh

@@ -33,3 +33,7 @@ dist/
 
 # Locust
 **/__pycache__/
+
+# Experiment run data
+.tmp/
+results/
