@@ -36,6 +36,8 @@ def make_booking(client, event_id, seat_number, customer_id):
     ) as resp:
         if resp.status_code == 201:
             resp.success()
+        elif resp.status_code == 409:
+            resp.success()  # contention — expected, don't mark as failure
         else:
             resp.failure(f"Unexpected status code: {resp.status_code}. Failed to place order: {resp.text}")
 
@@ -87,27 +89,31 @@ class QueuedBookingUser(HttpUser):
 
             # Timeout — fire as its own named event so it's isolated in stats
             if elapsed > MAX_WAIT_SECONDS:
-                events.request.fire(
-                    request_type="QUEUE",
-                    name="queue_admission",
-                    response_time=elapsed * 1000,   # ms
-                    response_length=0,
-                    exception=Exception("Admission timeout after 2 minutes"),
-                )
-                return  # skip booking — never admitted
+                admitted = False
+                break  # skip booking — never admitted
 
             # Poll status endpoint
-            status_resp = self.client.get(
-                f"/queue/api/v1/queue/status/{queue_id}"
-            )
-            status = status_resp.json().get("status")
-
-            if status == "admitted":
-                admitted = True
-                break
+            with self.client.get(
+                f"/queue/api/v1/queue/status/{queue_id}",
+                name="/queue/api/v1/queue/status/[queue_id]",
+                catch_response=True
+            ) as status_resp:
+                status = status_resp.json().get("status")
+                status_resp.success()
+                if status == "admitted":
+                    admitted = True
+                    break
 
             time.sleep(POLL_INTERVAL)
 
+        events.request.fire(
+                    request_type="QUEUE",
+                    name="queue_admission",
+                    response_time=(time.time() - start_time) * 1000,   # ms
+                    response_length=0,
+                    exception=None if admitted else Exception("Admission timeout after 2 minutes"),
+                )
+        
         # --- Phase 3: Book (only if admitted) ---
         if admitted:
             make_booking(self.client, EVENT_ID, seat_number, customer_id)
