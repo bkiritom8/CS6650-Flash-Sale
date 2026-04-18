@@ -149,8 +149,10 @@ npm install       # first time only
 npm run dev:all
 ```
 
-Open `http://localhost:5173` in your browser. 
-- The default view is the **Fan View**. 
+> **Important:** Use `npm run dev:all`, not `npm run dev`. The dashboard has two processes: the Vite frontend (port 5173) and an Express backend (port 3001). The Express server is what actually runs the experiment scripts and streams output to the browser. Running only `npm run dev` starts the frontend but leaves the backend offline — clicking "Run Experiment" will silently fail.
+
+Open `http://localhost:5173` in your browser.
+- The default view is the **Fan View**.
 - To access the **Analytics** and built-in **Experiments** panels, click on the **Admin Control** tab and enter the password: `admin`.
 
 ### Step 6 — Tear down when done

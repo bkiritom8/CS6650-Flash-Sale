@@ -11,10 +11,10 @@ interface SimulationContextValue {
 }
 
 const MOCK_EVENTS: TicketEvent[] = [
-  { id: '1', name: 'Taylor Swift NYC', date: 'Oct 24, 2026', location: 'MetLife Stadium', status: 'live', price: 299, imageUrl: 'https://images.unsplash.com/photo-1540039155732-d6749b93223e?auto=format&fit=crop&q=80&w=800' },
-  { id: '2', name: 'Bad Bunny LA', date: 'Nov 12, 2026', location: 'SoFi Stadium', status: 'live', price: 185, imageUrl: 'https://images.unsplash.com/photo-1459749411175-04bf5292ceea?auto=format&fit=crop&q=80&w=800' },
-  { id: '3', name: 'Beyoncé Chicago', date: 'Dec 05, 2026', location: 'Soldier Field', status: 'upcoming', price: 350, imageUrl: 'https://images.unsplash.com/photo-1470229722913-7c090bd5a25b?auto=format&fit=crop&q=80&w=800' },
-  { id: '4', name: 'Coldplay London', date: 'Jan 15, 2027', location: 'Wembley', status: 'upcoming', price: 120, imageUrl: 'https://images.unsplash.com/photo-1493225457124-a1a2a5ea3a72?auto=format&fit=crop&q=80&w=800' }
+  { id: '1', name: 'Taylor Swift NYC', date: 'Oct 24, 2026', location: 'MetLife Stadium', status: 'live', price: 299, imageUrl: 'https://picsum.photos/seed/concert1/800/450' },
+  { id: '2', name: 'Bad Bunny LA', date: 'Nov 12, 2026', location: 'SoFi Stadium', status: 'live', price: 185, imageUrl: 'https://picsum.photos/seed/concert2/800/450' },
+  { id: '3', name: 'Beyoncé Chicago', date: 'Dec 05, 2026', location: 'Soldier Field', status: 'upcoming', price: 350, imageUrl: 'https://picsum.photos/seed/concert3/800/450' },
+  { id: '4', name: 'Coldplay London', date: 'Jan 15, 2027', location: 'Wembley', status: 'upcoming', price: 120, imageUrl: 'https://picsum.photos/seed/concert4/800/450' }
 ]
 
 const SimulationContext = createContext<SimulationContextValue | null>(null)

@@ -19,7 +19,7 @@ app.get('/api/stream-experiment/:id', (req, res) => {
   const { id } = req.params;
   
   // Validate experiment ID to prevent command injection
-  const validExperiments = ['exp1', 'exp2', 'exp4', 'exp5'];
+  const validExperiments = ['exp1', 'exp2', 'exp3', 'exp4', 'exp5'];
   if (!validExperiments.includes(id)) {
     return res.status(400).json({ error: 'Invalid experiment ID' });
   }
@@ -71,7 +71,7 @@ app.get('/api/stream-experiment/:id', (req, res) => {
 
 app.get('/api/latest-result/:id', (req, res) => {
   const { id } = req.params;
-  const validExperiments = ['exp1', 'exp2', 'exp4', 'exp5'];
+  const validExperiments = ['exp1', 'exp2', 'exp3', 'exp4', 'exp5'];
   
   if (!validExperiments.includes(id)) {
     return res.status(400).json({ error: 'Invalid experiment ID' });
