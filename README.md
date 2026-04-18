@@ -226,6 +226,7 @@ Compares three autoscaling policies (target tracking, step scaling, no autoscali
 To keep the load profile consistent across runs, use the custom `LoadTestShape` in `locustfile.py` which simulates a ticket drop pattern: near-zero traffic → instant spike → sustained peak → drop-off. Locust testing is run on EC2 instances to generate enough load to trigger autoscaling, and to isolate the effects of scaling decisions.
 
 Control variables: queue admission rate (50), fairness mode (allow multiple), and backend (mysql) are held constant to isolate the impact of autoscaling policies. To be consistent across target and step scaling, we're using the same target CPU utilization (70%) for scaling decisions.
+
 Configurations tested:
 | Configuration | Description |
 |---|---|
