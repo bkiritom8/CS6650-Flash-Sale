@@ -63,13 +63,16 @@ variable "autoscaling_cpu_target" {
 variable "scaling_policy_type" { 
   description = "Autoscaling policy, either 'target_tracking' or 'step'"
   type = string
-  default = "target_tracking"}
+  default = "target_tracking" 
+}
 
 variable "scale_in_cooldown" { 
-  default = 300 }
+  default = 300
+}
 
 variable "scale_out_cooldown"{
-  default = 60 }
+  default = 60
+}
 
 variable "step_adjustments" {
   description = "List of step bounds and scaling adjustments for step autoscaling"
