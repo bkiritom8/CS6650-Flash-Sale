@@ -31,6 +31,12 @@ CS6650-Flash-Sale/
 │   │   ├── locustfile.py               # Locust load test — direct and queued scenarios
 │   │   └── parse_stats.py              # Parses Locust CSV output for the test script
 │   │
+│   │── experiment3/                    # Auto scaling under ticket drop load
+│   │   ├── .env                        # Config variables (key_path, ALB DNS) required for running the experiment
+│   │   ├── setup.ps1                   # One-time setup: creates EC2 instances and security groupfor load testing and copies locust file to them
+│   │   ├── exp3-locust-test.ps1        # Runs the experiment across all configurations, collects results, and stops EC2 instances when done
+│   │   └── plot_stats.py               # Parses CSV results and generates comparison charts
+
 │   └── experiment4/                    # Multiple concurrent flash sales
 │       ├── locustfile.py               # Locust load test — 5 weighted user classes
 │       └── parse_stats.py              # Parses per-event stats from Locust CSV
@@ -246,6 +252,7 @@ cd experiments/experiment3
 ./exp3-locust-test.ps1 # Each test will take about 5 minutes to run. Results saved to experiments/experiment3/results
 
 ```
+You will need to manually terminate the EC2 instances after the tests complete (the script will print the instance IDs at the end). The script automatically stops them, but they will remain in your account until you terminate them.
 
 Watch in AWS Console: ECS Service Tasks tab, CloudWatch ECS CPUUtilization, ALB Target Group healthy host count.
 
