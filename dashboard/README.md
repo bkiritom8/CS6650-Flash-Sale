@@ -25,6 +25,8 @@ Open `http://localhost:5173`. The Experiment Runner panel makes SSE requests to 
 
 The backend spawns shell scripts from `../scripts/expN-locust-test.sh` and streams stdout/stderr back to the browser via Server-Sent Events. Results are read from `../results/expN_<timestamp>.csv` after each run completes.
 
+Each experiment's chart is displayed separately (not combined). When running multiple experiments, charts accumulate — one per completed experiment — and appear **above** the execution log so results are visible without scrolling past terminal output. Re-running a single experiment replaces only that experiment's chart.
+
 **Requirements before running experiments:**
 - AWS infrastructure must be deployed (`../scripts/deploy.sh`)
 - Python 3 + Locust installed (`pip install locust`)

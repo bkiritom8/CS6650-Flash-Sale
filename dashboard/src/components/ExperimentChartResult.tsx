@@ -86,6 +86,25 @@ export function ExperimentChartResult({ id, data }: { id: string, data: any[] })
         },
         options: { ...commonOptions, plugins: { ...commonOptions.plugins, title: { display: true, text: 'Fairness Mode Latencies (Exp 5)', color: 'white' } } }
       };
+    } else if (id === 'exp3') {
+      // Autoscaling policy comparison — rows keyed by config name
+      const labels = data.map(d => d.config || d.name || d.Name || 'run');
+      const avg = data.map(d => parseInt(d.avg_ms ?? d['Average Response Time']) || 0);
+      const p95 = data.map(d => parseInt(d.p95_ms ?? d['95%']) || 0);
+      const p99 = data.map(d => parseInt(d.p99_ms ?? d['99%']) || 0);
+
+      chartConfig = {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [
+            { label: 'Avg ms',  data: avg, backgroundColor: '#ec4899' },
+            { label: 'p95 ms',  data: p95, backgroundColor: '#8b5cf6' },
+            { label: 'p99 ms',  data: p99, backgroundColor: '#f59e0b' },
+          ]
+        },
+        options: { ...commonOptions, plugins: { ...commonOptions.plugins, title: { display: true, text: 'Autoscaling Policy Latencies (Exp 3)', color: 'white' } } }
+      };
     } else {
        // generic fallback (Exp 2, Exp 4)
        const headers = Object.keys(data[0]).filter(k => k.includes('ms') || k.includes('throughput'));
