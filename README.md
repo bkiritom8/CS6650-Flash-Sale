@@ -221,27 +221,32 @@ Queue metrics are polled every 5 seconds during queued tests and saved to `.tmp/
 
 ### Experiment 3 — Auto Scaling Under Ticket Drop Load
 
-Vary CPU target thresholds and cooldown periods to find configurations that handle a sudden spike without over-provisioning.
+Compares three autoscaling policies (target tracking, step scaling, no autoscaling) under a ticket drop load profile. Within each policy, test "agressive" vs "conservative" policies to see how they respond to sudden load changes.
 
-```bash
-cd terraform/main
+To keep the load profile consistent across runs, use the custom `LoadTestShape` in `locustfile.py` which simulates a ticket drop pattern: near-zero traffic → instant spike → sustained peak → drop-off. Locust testing is run on EC2 instances to generate enough load to trigger autoscaling, and to isolate the effects of scaling decisions.
 
-# Aggressive scaling (triggers sooner)
-terraform apply -auto-approve -var="autoscaling_cpu_target=50"
+Control variables: queue admission rate (50), fairness mode (allow multiple), and backend (mysql) are held constant to isolate the impact of autoscaling policies. To be consistent across target and step scaling, we're using the same target CPU utilization (70%) for scaling decisions.
+Configurations tested:
+| Configuration | Description |
+|---|---|
+| `target_aggressive` | Target tracking with low scale out cooldown (30) for aggressive scaling |
+| `target_conservative` | Target tracking with a high scale out cooldown (120) for conservative scaling |
+| `step_aggressive` | Step scaling with low scale out cooldown (30) and low thresholds for aggressive scaling |
+| `step_conservative` | Step scaling with high scale out cooldown (120) and higher thresholds for conservative scaling |
+| `no_autoscaling` | No autoscaling — fixed number of tasks (control group) |
 
-# Conservative scaling
-terraform apply -auto-approve -var="autoscaling_cpu_target=90"
+```Powershell
+cd experiments/experiment3
+
+# Edit the .env file to set your SSH key path then run:
+./setup.ps1 # (one-time setup: creates EC2 instances for load testing and copies locust file to them)
+
+# Edit the .env file to set your ALB DNS name (from Terraform outputs) then run:
+./exp3-locust-test.ps1 # Each test will take about 5 minutes to run. Results saved to experiments/experiment3/results
+
 ```
-
-Use a Locust custom `LoadTestShape` class to simulate the ticket drop load profile: near-zero traffic → instant spike → sustained peak → drop-off.
 
 Watch in AWS Console: ECS Service Tasks tab, CloudWatch ECS CPUUtilization, ALB Target Group healthy host count.
-
-Change admission rate at runtime without redeploying:
-```bash
-curl -X POST http://<ALB>/queue/api/v1/queue/event/evt-001/admission-rate \
-  -H "Content-Type: application/json" -d '{"rate": 50}'
-```
 
 ---
 

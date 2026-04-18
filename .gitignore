@@ -20,6 +20,7 @@ experiments/experiment1/experiment1
 # Python
 __pycache__/
 *.pyc
+*.env
 
 # Node
 node_modules/
