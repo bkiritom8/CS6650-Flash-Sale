@@ -53,6 +53,12 @@ CS6650-Flash-Sale/
 │
 ├── ticketing-app/                      # Standalone fan-facing ticketing UI (React)
 │
+├── powershell_scripts/                 # Windows PowerShell equivalents of bash scripts
+│   ├── deploy.ps1
+│   ├── cleanup.ps1
+│   ├── exp2-locust-test.ps1
+│   └── test-platform.ps1
+│
 ├── results/                            # Auto-generated experiment results (CSV + PNG)
 │
 ├── scripts/                            # Main automation scripts (bash, cross-platform)
