@@ -36,7 +36,7 @@ app.get('/api/stream-experiment/:id', (req, res) => {
   console.log(`Running experiment script: ${scriptPath}`);
 
   // Spawn the shell script
-  const child = spawn('sh', [scriptPath], {
+  const child = spawn('bash', [scriptPath], {
     cwd: path.resolve(__dirname, '..'), // Run from repo root
   });
 
