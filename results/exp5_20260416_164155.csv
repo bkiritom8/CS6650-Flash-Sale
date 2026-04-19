@@ -1,0 +1,13 @@
+backend,fairness_mode,endpoint,requests,failures,avg_ms,p50_ms,p95_ms,p99_ms,queue_metrics_file,greedy_joins
+mysql,allow_multiple,booking/book,401,0,64,57,100,230,/Users/bhargav/Documents/CS6650-Flash-Sale/.tmp/exp5_locust/mysql_allow_multiple_queue_metrics.jsonl,3
+mysql,allow_multiple,queue/join,721,0,135,170,190,190,/Users/bhargav/Documents/CS6650-Flash-Sale/.tmp/exp5_locust/mysql_allow_multiple_queue_metrics.jsonl,3
+mysql,allow_multiple,queue/status,5884,0,66,64,98,110,/Users/bhargav/Documents/CS6650-Flash-Sale/.tmp/exp5_locust/mysql_allow_multiple_queue_metrics.jsonl,3
+mysql,collapse,booking/book,401,0,60,58,88,110,/Users/bhargav/Documents/CS6650-Flash-Sale/.tmp/exp5_locust/mysql_collapse_queue_metrics.jsonl,3
+mysql,collapse,queue/join,721,0,188,200,430,440,/Users/bhargav/Documents/CS6650-Flash-Sale/.tmp/exp5_locust/mysql_collapse_queue_metrics.jsonl,3
+mysql,collapse,queue/status,4334,0,64,61,100,170,/Users/bhargav/Documents/CS6650-Flash-Sale/.tmp/exp5_locust/mysql_collapse_queue_metrics.jsonl,3
+dynamodb,allow_multiple,booking/book,401,0,157,110,300,310,/Users/bhargav/Documents/CS6650-Flash-Sale/.tmp/exp5_locust/dynamodb_allow_multiple_queue_metrics.jsonl,3
+dynamodb,allow_multiple,queue/join,723,0,197,160,470,620,/Users/bhargav/Documents/CS6650-Flash-Sale/.tmp/exp5_locust/dynamodb_allow_multiple_queue_metrics.jsonl,3
+dynamodb,allow_multiple,queue/status,6000,0,72,72,100,220,/Users/bhargav/Documents/CS6650-Flash-Sale/.tmp/exp5_locust/dynamodb_allow_multiple_queue_metrics.jsonl,3
+dynamodb,collapse,booking/book,401,0,289,300,490,530,/Users/bhargav/Documents/CS6650-Flash-Sale/.tmp/exp5_locust/dynamodb_collapse_queue_metrics.jsonl,3
+dynamodb,collapse,queue/join,721,0,173,230,280,290,/Users/bhargav/Documents/CS6650-Flash-Sale/.tmp/exp5_locust/dynamodb_collapse_queue_metrics.jsonl,3
+dynamodb,collapse,queue/status,4352,0,64,62,98,120,/Users/bhargav/Documents/CS6650-Flash-Sale/.tmp/exp5_locust/dynamodb_collapse_queue_metrics.jsonl,3

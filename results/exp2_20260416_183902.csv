@@ -1,0 +1,5 @@
+backend,scenario,requests,failures,success_rate,avg_ms,p50_ms,p95_ms,p99_ms,queue_metrics_file
+mysql,direct,501,0,100.0%,11925,12000,14000,14000,/Users/bhargav/Documents/CS6650-Flash-Sale/.tmp/exp2_locust/mysql_direct_queue_metrics.jsonl
+mysql,queued,895,400,55.3%,371,290,870,970,/Users/bhargav/Documents/CS6650-Flash-Sale/.tmp/exp2_locust/mysql_queued_queue_metrics.jsonl
+dynamodb,direct,950,756,20.4%,699,680,1100,1200,/Users/bhargav/Documents/CS6650-Flash-Sale/.tmp/exp2_locust/dynamodb_direct_queue_metrics.jsonl
+dynamodb,queued,500,0,100.0%,11306,12000,14000,14000,/Users/bhargav/Documents/CS6650-Flash-Sale/.tmp/exp2_locust/dynamodb_queued_queue_metrics.jsonl

@@ -1,73 +1,42 @@
-# React + TypeScript + Vite
+# Dashboard
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + TypeScript frontend with an Express backend that streams experiment output to the browser.
 
-Currently, two official plugins are available:
+## Architecture
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+The dashboard has two processes that must both be running:
 
-## React Compiler
+| Process | Command | Port | Purpose |
+|---|---|---|---|
+| Vite dev server | `npm run dev` | 5173 | React frontend |
+| Express backend | `npm run start:server` | 3001 | Experiment runner + results API |
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+**Always start both together:**
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+cd dashboard
+npm install       # first time only
+npm run dev:all   # starts both Vite (5173) and Express (3001)
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Open `http://localhost:5173`. The Experiment Runner panel makes SSE requests to `http://localhost:3001/api/stream-experiment/:id` — if the Express server isn't running, clicking "Run Experiment" will silently fail with a stream disconnect error.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Experiment Runner
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+The backend spawns shell scripts from `../scripts/expN-locust-test.sh` and streams stdout/stderr back to the browser via Server-Sent Events. Results are read from `../results/expN_<timestamp>.csv` after each run completes.
+
+Each experiment's chart is displayed separately (not combined). When running multiple experiments, charts accumulate — one per completed experiment — and appear **above** the execution log so results are visible without scrolling past terminal output. Re-running a single experiment replaces only that experiment's chart.
+
+**Requirements before running experiments:**
+- AWS infrastructure must be deployed (`../scripts/deploy.sh`)
+- Python 3 + Locust installed (`pip install locust`)
+
+## Available Scripts
+
+```bash
+npm run dev          # frontend only (experiments won't work)
+npm run start:server # backend only
+npm run dev:all      # both (use this)
+npm run build        # production build
+npm test             # run Vitest tests
 ```

@@ -1,32 +1,40 @@
-# If you prefer the allow list template instead of the deny list, see community template:
-# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
-#
-# Binaries for programs and plugins
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfstate.lock.info
+*.tfvars
+.terraform.lock.hcl
 
-# Test binary, built with `go test -c`
-*.test
+# Go
+**/go.sum
+**/vendor/
 
-# Code coverage profiles and other test artifacts
-*.out
-coverage.*
-*.coverprofile
-profile.cov
+# Binaries
+src/*/inventory-service
+src/*/booking-service
+src/*/queue-service
+src/experiment1/experiment1
+experiments/experiment1/experiment1
 
-# Dependency directories (remove the comment below to include it)
-# vendor/
+# Python
+__pycache__/
+*.pyc
+*.env
 
-# Go workspace file
-go.work
-go.work.sum
+# Node
+node_modules/
+dist/
 
-# env file
-.env
+# Test output
+/tmp/
 
-# Editor/IDE
-# .idea/
-# .vscode/
+# OS
+.DS_Store
+
+# Locust
+**/__pycache__/
+
+# Experiment run data
+.tmp/
+results/
