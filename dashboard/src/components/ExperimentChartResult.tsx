@@ -108,7 +108,8 @@ export function ExperimentChartResult({ id, data }: { id: string, data: any[] })
     } else {
        // generic fallback (Exp 2, Exp 4)
        const headers = Object.keys(data[0]).filter(k => k.includes('ms') || k.includes('throughput'));
-       
+       const palette = ['#ec4899', '#3b82f6', '#8b5cf6', '#f59e0b', '#10b981', '#ef4444'];
+
        chartConfig = {
         type: 'bar',
         data: {
@@ -116,7 +117,7 @@ export function ExperimentChartResult({ id, data }: { id: string, data: any[] })
           datasets: headers.map((h, i) => ({
              label: h,
              data: data.map(d => parseInt(d[h]) || 0),
-             backgroundColor: i === 0 ? '#10b981' : '#f59e0b'
+             backgroundColor: palette[i % palette.length]
           }))
         },
         options: { ...commonOptions, plugins: { ...commonOptions.plugins, title: { display: true, text: 'Results', color: 'white' } } }
