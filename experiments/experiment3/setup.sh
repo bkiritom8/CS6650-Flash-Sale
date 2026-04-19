@@ -2,8 +2,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Load .env
-set -a; source "${SCRIPT_DIR}/../experiments/experiment3/.env"; set +a
+set -a; source "${SCRIPT_DIR}/.env"; set +a
+
+echo "Creating security group and launching EC2 instances for Locust workers"
 
 VPC_ID=$(aws ec2 describe-vpcs --filters "Name=isDefault,Values=true" \
     --query "Vpcs[0].VpcId" --output text)
@@ -59,7 +60,7 @@ wait "${PIDS[@]}"
 echo "Uploading locustfile.py to all instances..."
 for instance in "${EC2_IPS[@]}"; do
     scp -i "$KEY_PATH" -o StrictHostKeyChecking=no \
-        "${SCRIPT_DIR}/../experiments/experiment3/locustfile.py" "ec2-user@${instance}:~/locustfile.py"
+        "${SCRIPT_DIR}/locustfile.py" "ec2-user@${instance}:~/locustfile.py"
 done
 
 echo "Done. Instance IDs:"

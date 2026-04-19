@@ -2,9 +2,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TERRAFORM_DIR="${SCRIPT_DIR}/../terraform/main"
-# Load .env
-set -a; source "${SCRIPT_DIR}/../experiments/experiment3/.env"; set +a
+TERRAFORM_DIR="${SCRIPT_DIR}/../../terraform/main"
+
+set -a; source "${SCRIPT_DIR}/.env"; set +a
 
 MIN_TASKS=2
 MAX_TASKS=10
@@ -67,7 +67,7 @@ reset_services() {
     curl -sf -X POST "http://${ALB}/booking/api/v1/reset"
 }
 
-mkdir -p results
+mkdir -p "${SCRIPT_DIR}/results"
 
 echo "Starting EC2 instances"
 mapfile -t INSTANCE_IDS < <(aws ec2 describe-instances \
@@ -109,7 +109,7 @@ run_config() {
         ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "ec2-user@${EC2}" \
             "~/.local/bin/locust -f locustfile.py --host=http://${ALB} --headless --master --csv=results_${config}_run${i} --expect-workers=4"
         scp -i "$KEY_PATH" -o StrictHostKeyChecking=no \
-            "ec2-user@${EC2}:~/results_${config}_run${i}*" ./results/
+            "ec2-user@${EC2}:~/results_${config}_run${i}*" "${SCRIPT_DIR}/results/"
 
         kill "${WORKER_PIDS[@]}" 2>/dev/null || true
         wait "${WORKER_PIDS[@]}" 2>/dev/null || true

@@ -62,7 +62,7 @@ switch_backend() {
     local backend=$1
     echo "    Switching backend to: ${backend}..."
     cd "${MAIN_TF}"
-    terraform apply -auto-approve -var="db_backend=${backend}" > /dev/null 2>&1
+    terraform apply -auto-approve -var="db_backend=${backend}" > /dev/null
     cd "${REPO_ROOT}"
 
     echo -n "    Waiting for services to stabilise "
