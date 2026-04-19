@@ -70,14 +70,16 @@ reset_services() {
 mkdir -p results
 
 echo "Starting EC2 instances"
-mapfile -t INSTANCE_IDS < <(aws ec2 describe-instances \
+INSTANCE_IDS=()
+while IFS= read -r line; do [[ -n "$line" ]] && INSTANCE_IDS+=("$line"); done < <(aws ec2 describe-instances \
     --filters "Name=tag:Role,Values=locust-worker" "Name=instance-state-name,Values=stopped,running" \
     --query "Reservations[*].Instances[*].InstanceId" --output text | tr '\t' '\n')
 
 aws ec2 start-instances --instance-ids "${INSTANCE_IDS[@]}" > /dev/null
 aws ec2 wait instance-status-ok --instance-ids "${INSTANCE_IDS[@]}"
 
-mapfile -t ALL_IPS < <(aws ec2 describe-instances \
+ALL_IPS=()
+while IFS= read -r line; do [[ -n "$line" ]] && ALL_IPS+=("$line"); done < <(aws ec2 describe-instances \
     --instance-ids "${INSTANCE_IDS[@]}" \
     --query "Reservations[*].Instances[*].PublicIpAddress" --output text | tr '\t' '\n')
 

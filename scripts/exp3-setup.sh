@@ -31,18 +31,20 @@ AMI_ID=$(aws ec2 describe-images --owners amazon \
 echo "Launching 5 EC2 instances (AMI: $AMI_ID)"
 aws ec2 run-instances \
     --image-id "$AMI_ID" --count 5 --instance-type t2.micro \
-    --key-name "cs6650key1" \
+    --key-name "cs6650-hw1b" \
     --tag-specifications 'ResourceType=instance,Tags=[{Key=Role,Value=locust-worker}]' \
     --security-group-ids "$SG_ID" > /dev/null
 
-mapfile -t INSTANCE_IDS < <(aws ec2 describe-instances \
+INSTANCE_IDS=()
+while IFS= read -r line; do [[ -n "$line" ]] && INSTANCE_IDS+=("$line"); done < <(aws ec2 describe-instances \
     --filters "Name=tag:Role,Values=locust-worker" "Name=instance-state-name,Values=stopped,running" \
     --query "Reservations[*].Instances[*].InstanceId" --output text | tr '\t' '\n')
 
 echo "Waiting for instances to be ready..."
 aws ec2 wait instance-status-ok --instance-ids "${INSTANCE_IDS[@]}"
 
-mapfile -t EC2_IPS < <(aws ec2 describe-instances \
+EC2_IPS=()
+while IFS= read -r line; do [[ -n "$line" ]] && EC2_IPS+=("$line"); done < <(aws ec2 describe-instances \
     --instance-ids "${INSTANCE_IDS[@]}" \
     --query "Reservations[*].Instances[*].PublicIpAddress" --output text | tr '\t' '\n')
 
