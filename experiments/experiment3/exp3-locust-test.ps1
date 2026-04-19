@@ -2,9 +2,9 @@ Get-Content .env | ForEach-Object {
     $key, $value = $_ -split '=', 2
     Set-Variable -Name $key -Value $value
 }
-# $key_path = "path/to/your/key.pem" #path to your SSH key for EC2 access
+
 $instance_ids = (aws ec2 describe-instances --filters "Name=tag:Role,Values=locust-worker" "Name=instance-state-name,Values=stopped,running" --query "Reservations[*].Instances[*].InstanceId" --output text).Split()
-#$ALB = "concert-platform-alb-837745789.us-east-1.elb.amazonaws.com"
+
 $host_name = $ALB
 #Write-Host "Running tests pointed at ALB: $ALB"
 $min_tasks = 2
@@ -14,7 +14,7 @@ $service_name = "concert-platform-booking"
 $queue_cluster_name = "concert-platform-queue-cluster"
 $queue_service_name = "concert-platform-queue"
 $backend = "mysql"
-$admission_rate = 50
+$admission_rate = 100
 
 
 $configurations = @(
@@ -101,14 +101,16 @@ $EC2_workers = $all_ips[1..($all_ips.Length - 1)]
 foreach ($config in $configurations) {
     # Determine configuration and apply terraform
     $configuration = $config.name
-    Write-Host "Applying scaling configuration: $configuration"
+    Write-Host "Creating auto-scaling policy configuration: $configuration"
     if ($config.scaling_policy_type -eq "target_tracking") {
-        terraform "-chdir=../../terraform/main" apply -var "autoscaling_min=${min_tasks}" -var "autoscaling_max=${max_tasks}" -var "scaling_policy_type=${config.scaling_policy_type}" -var "scale_out_cooldown=${config.scale_out_cooldown}" -var "scale_in_cooldown=${config.scale_in_cooldown}" -var "autoscaling_cpu_target=${config.target_cpu}" -var "db_backend=${backend}" -var "admission_rate=${admission_rate}" -auto-approve
+        $cmd = "terraform '-chdir=../../terraform/main' apply -var 'autoscaling_min=${min_tasks}' -var 'autoscaling_max=${max_tasks}' -var 'scaling_policy_type=${config.scaling_policy_type}' -var 'scale_out_cooldown=${config.scale_out_cooldown}' -var 'scale_in_cooldown=${config.scale_in_cooldown}' -var 'autoscaling_cpu_target=${config.target_cpu}' -var 'db_backend=${backend}' -var 'admission_rate=${admission_rate}' -auto-approve"
+        Write-Host "Applying terraform configuration with command: $cmd"
+        terraform "-chdir=../../terraform/main" apply -var "autoscaling_min=${min_tasks}" -var "autoscaling_max=${max_tasks}" -var "scaling_policy_type=$($config.scaling_policy_type)" -var "scale_out_cooldown=$($config.scale_out_cooldown)" -var "scale_in_cooldown=$($config.scale_in_cooldown)" -var "autoscaling_cpu_target=$($config.target_cpu)" -var "db_backend=${backend}" -var "admission_rate=${admission_rate}" -auto-approve
     } elseif ($config.scaling_policy_type -eq "step") {
         $json = $config.step_adjustments | ConvertTo-Json -Compress
-        terraform "-chdir=../../terraform/main" apply -var "autoscaling_min=${min_tasks}" -var "autoscaling_max=${max_tasks}" -var "scaling_policy_type=${config.scaling_policy_type}" -var "scale_out_cooldown=${config.scale_out_cooldown}" -var "scale_in_cooldown=${config.scale_in_cooldown}" -var "autoscaling_cpu_target=${config.target_cpu}" -var "alarm_cpu_threshold=${config.alarm}" -var "step_adjustments=${json}" -var "db_backend=${backend}" -var "admission_rate=${admission_rate}" -auto-approve
+        terraform "-chdir=../../terraform/main" apply -var "autoscaling_min=${min_tasks}" -var "autoscaling_max=${max_tasks}" -var "scaling_policy_type=$($config.scaling_policy_type)" -var "scale_out_cooldown=$($config.scale_out_cooldown)" -var "scale_in_cooldown=$($config.scale_in_cooldown)" -var "autoscaling_cpu_target=$($config.target_cpu)" -var "alarm_cpu_threshold=$($config.alarm)" -var "step_adjustments=${json}" -var "db_backend=${backend}" -var "admission_rate=${admission_rate}" -auto-approve
     } elseif ($config.scaling_policy_type -eq "none") {
-        terraform "-chdir=../../terraform/main" apply -var "autoscaling_min=${min_tasks}" -var "autoscaling_max=${max_tasks}" -var "scaling_policy_type=${config.scaling_policy_type}" -var "db_backend=${backend}" -var "admission_rate=${admission_rate}" -auto-approve
+        terraform "-chdir=../../terraform/main" apply -var "autoscaling_min=${min_tasks}" -var "autoscaling_max=${max_tasks}" -var "scaling_policy_type=$($config.scaling_policy_type)" -var "db_backend=${backend}" -var "admission_rate=${admission_rate}" -auto-approve
     }
     if ($LASTEXITCODE -ne 0) {
         Stop-Experiment -jobs $jobs -message "Failed to apply scaling configuration: $configuration. Stopping experiment."
@@ -146,8 +148,6 @@ foreach ($config in $configurations) {
             $job = Start-Job -ScriptBlock {
                 param($worker_ip, $key_path, $host_name, $EC2)
                 $cmd = "~/.local/bin/locust -f locustfile.py --host=http://$host_name --worker --master-host=$EC2"
-                Write-Output "Command: $cmd"
-                Write-Output "Worker: $worker_ip"
                 ssh -i $key_path -o StrictHostKeyChecking=no ec2-user@$worker_ip $cmd
             } -ArgumentList $EC2_workers[0], $key_path, $host_name, $EC2
 

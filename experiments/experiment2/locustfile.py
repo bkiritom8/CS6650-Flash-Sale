@@ -9,8 +9,8 @@ from locust.exception import StopUser
 # ---------------------------------------------------------------------------
 POLL_INTERVAL    = 2        # seconds between status polls
 MAX_WAIT_SECONDS = 120      # 2-minute admission timeout
-MAX_SEATS        = 1000      # TODO: set to your actual seat range
-EVENT_ID         = "evt-001"    # TODO: set to your event ID
+MAX_SEATS        = 200      # TODO: set to your actual seat range
+EVENT_ID         = "evt-004"    # TODO: set to your event ID
 
 # Shared across all user instances — each next() call advances globally
 seat_cycle = itertools.cycle(range(1, MAX_SEATS + 1))
@@ -117,4 +117,4 @@ class QueuedBookingUser(HttpUser):
         # --- Phase 3: Book (only if admitted) ---
         if admitted:
             make_booking(self.client, EVENT_ID, seat_number, customer_id)
-        raise StopUser()  # one booking per user instance, then stop
+        #raise StopUser()  # one booking per user instance, then stop
