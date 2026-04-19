@@ -14,7 +14,7 @@ const EXPERIMENTS: ExperimentDefinition[] = [
   { id: 'exp2', name: 'Experiment 2', description: 'High Concurrency Scenario' },
   { id: 'exp3', name: 'Experiment 3', description: 'Autoscaling Policy Comparison' },
   { id: 'exp4', name: 'Experiment 4', description: 'Fault Tolerance Test' },
-  { id: 'exp5', name: 'Experiment 5', description: 'Full System Verification' },
+  { id: 'exp5', name: 'Experiment 5', description: 'Queue Fairness (collapse vs allow_multiple)' },
 ];
 
 export function ExperimentsPanel() {
