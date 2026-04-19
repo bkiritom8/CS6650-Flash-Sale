@@ -257,28 +257,33 @@ Queue metrics are polled every 5 seconds during queued tests and saved to `.tmp/
 
 ### Experiment 3 — Auto Scaling Under Ticket Drop Load
 
-Compares three autoscaling policies (target tracking, step scaling, no autoscaling) under a ticket drop load profile. Within each policy, tests "aggressive" vs "conservative" configurations to see how they respond to sudden load changes.
+Compares three autoscaling policies (target tracking, step scaling, no autoscaling) under a ticket drop load profile. Within each policy, test "agressive" vs "conservative" policies to see how they respond to sudden load changes.
 
-Uses a custom `LoadTestShape` in `locustfile.py` that simulates a ticket drop pattern: near-zero traffic → instant spike → sustained peak → drop-off. Load is generated from EC2 instances to produce enough volume to trigger autoscaling events.
+To keep the load profile consistent across runs, use the custom `LoadTestShape` in `locustfile.py` which simulates a ticket drop pattern: near-zero traffic → instant spike → sustained peak → drop-off. Locust testing is run on EC2 instances to generate enough load to trigger autoscaling, and to isolate the effects of scaling decisions.
 
-Control variables held constant: queue admission rate (50), fairness mode (allow_multiple), backend (mysql).
+Control variables: queue admission rate (50), fairness mode (allow multiple), and backend (mysql) are held constant to isolate the impact of autoscaling policies. To be consistent across target and step scaling, we're using the same target CPU utilization (70%) for scaling decisions.
 
+Configurations tested:
 | Configuration | Description |
 |---|---|
-| `target_aggressive` | Target tracking, scale-out cooldown 30s |
-| `target_conservative` | Target tracking, scale-out cooldown 120s |
-| `step_aggressive` | Step scaling, scale-out cooldown 30s, low thresholds |
-| `step_conservative` | Step scaling, scale-out cooldown 120s, higher thresholds |
-| `no_autoscaling` | Fixed task count (control group) |
+| `target_aggressive` | Target tracking with low scale out cooldown (30) for aggressive scaling |
+| `target_conservative` | Target tracking with a high scale out cooldown (120) for conservative scaling |
+| `step_aggressive` | Step scaling with low scale out cooldown (30) and low thresholds for aggressive scaling |
+| `step_conservative` | Step scaling with high scale out cooldown (120) and higher thresholds for conservative scaling |
+| `no_autoscaling` | No autoscaling — fixed number of tasks (control group) |
 
-```bash
-# One-time: provision 5 EC2 Locust workers
-# Edit experiments/experiment3/.env to set KEY_PATH and ALB
-bash scripts/exp3-setup.sh
+Use Powershell for this experiment:
+```Powershell
+cd experiments/experiment3
 
-# Run all 5 configurations
-bash scripts/exp3-locust-test.sh
+# Edit the .env file to set your SSH key path then run:
+./setup.ps1 # (one-time setup: creates EC2 instances for load testing and copies locust file to them)
+
+# Edit the .env file to set your ALB DNS name (from Terraform outputs) then run:
+./exp3-locust-test.ps1 # Each test will take about 5 minutes to run. Results saved to experiments/experiment3/results
+
 ```
+You will need to manually terminate the EC2 instances after the tests complete (the script will print the instance IDs at the end). The script automatically stops them, but they will remain in your account until you terminate them.
 
 Watch in AWS Console: ECS Service Tasks tab, CloudWatch ECS CPUUtilization, ALB Target Group healthy host count.
 
