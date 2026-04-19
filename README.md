@@ -6,11 +6,14 @@ A distributed systems research project simulating a concert ticket flash sale ba
 
 ## Prerequisites
 
-- Go 1.21+
-- Terraform 1.5+
-- Docker Desktop (must be running)
-- AWS CLI v2 configured with student account credentials
-- Python 3 + Locust (`pip install locust`)
+- **Go** 1.21+
+- **Terraform** 1.5+
+- **Docker Desktop** (must be running) — required for Terraform ECR image builds
+- **AWS CLI** v2 configured with credentials for `us-east-1`
+- **Node.js** 18+ and **npm** — for the dashboard
+- **Python 3** + **pip3** + **Locust** (`pip install locust`) — for load generation
+- **An AWS EC2 key pair** imported to `us-east-1` (used by Exp 3 EC2 setup)
+- **jq** — for parsing AWS CLI output in scripts
 - `curl`
 
 ---
@@ -31,21 +34,24 @@ CS6650-Flash-Sale/
 │   │   ├── locustfile.py               # Locust load test — direct and queued scenarios
 │   │   └── parse_stats.py              # Parses Locust CSV output for the test script
 │   │
-│   │── experiment3/                    # Auto scaling under ticket drop load
+│   ├── experiment3/                    # Auto scaling under ticket drop load
 │   │   ├── .env                        # Config variables (key_path, ALB DNS) required for running the experiment
-│   │   ├── setup.ps1                   # One-time setup: creates EC2 instances and security groupfor load testing and copies locust file to them
-│   │   ├── exp3-locust-test.ps1        # Runs the experiment across all configurations, collects results, and stops EC2 instances when done
+│   │   ├── locustfile.py               # Locust load test with ticket-drop LoadTestShape
 │   │   └── plot_stats.py               # Parses CSV results and generates comparison charts
-
-│   └── experiment4/                    # Multiple concurrent flash sales
-│       ├── locustfile.py               # Locust load test — 5 weighted user classes
-│       └── parse_stats.py              # Parses per-event stats from Locust CSV
+│   │
+│   ├── experiment4/                    # Multiple concurrent flash sales
+│   │   ├── locustfile.py               # Locust load test — 5 weighted user classes
+│   │   └── parse_stats.py              # Parses per-event stats from Locust CSV
+│   │
+│   └── experiment5/                    # Queue fairness — collapse vs allow_multiple
+│       └── locustfile.py               # Locust load test — fairness mode comparison
 │
-├── powershell_scripts/                 # Windows PowerShell equivalents (for reference)
-│   ├── deploy.ps1
-│   ├── cleanup.ps1
-│   ├── exp2-locust-test.ps1
-│   └── test-platform.ps1
+├── dashboard/                          # Experiment runner dashboard
+│   ├── src/                            # React + TypeScript frontend — live logs, per-experiment charts
+│   ├── server.js                       # Express backend — streams experiment output via SSE (port 3001)
+│   └── package.json                    # npm scripts: dev:all starts both Vite and Express
+│
+├── ticketing-app/                      # Standalone fan-facing ticketing UI (React)
 │
 ├── results/                            # Auto-generated experiment results (CSV + PNG)
 │
@@ -55,7 +61,10 @@ CS6650-Flash-Sale/
 │   ├── test-platform.sh                # Smoke test — verifies all endpoints after deploy
 │   ├── exp1-locust-test.sh             # Run Experiment 1 (all lock modes x both backends)
 │   ├── exp2-locust-test.sh             # Run Experiment 2 (direct vs queued x both backends)
-│   └── exp4-locust-test.sh             # Run Experiment 4 (5 events x 2 user counts x both backends)
+│   ├── exp3-setup.sh                   # One-time setup: provisions 5 EC2 Locust workers
+│   ├── exp3-locust-test.sh             # Run Experiment 3 (autoscaling policy comparison)
+│   ├── exp4-locust-test.sh             # Run Experiment 4 (5 events x 2 user counts x both backends)
+│   └── exp5-locust-test.sh             # Run Experiment 5 (queue fairness modes)
 │
 ├── src/                                # Go microservices
 │   ├── inventory-service/              # Manages events and seat availability
@@ -124,7 +133,8 @@ aws sts get-caller-identity   # verify credentials work
 ```bash
 chmod +x scripts/deploy.sh scripts/cleanup.sh scripts/test-platform.sh \
          scripts/exp1-locust-test.sh scripts/exp2-locust-test.sh \
-         scripts/exp4-locust-test.sh
+         scripts/exp3-setup.sh scripts/exp3-locust-test.sh \
+         scripts/exp4-locust-test.sh scripts/exp5-locust-test.sh
 ```
 
 ### Step 3 — Deploy
@@ -241,32 +251,28 @@ Queue metrics are polled every 5 seconds during queued tests and saved to `.tmp/
 
 ### Experiment 3 — Auto Scaling Under Ticket Drop Load
 
-Compares three autoscaling policies (target tracking, step scaling, no autoscaling) under a ticket drop load profile. Within each policy, test "agressive" vs "conservative" policies to see how they respond to sudden load changes.
+Compares three autoscaling policies (target tracking, step scaling, no autoscaling) under a ticket drop load profile. Within each policy, tests "aggressive" vs "conservative" configurations to see how they respond to sudden load changes.
 
-To keep the load profile consistent across runs, use the custom `LoadTestShape` in `locustfile.py` which simulates a ticket drop pattern: near-zero traffic → instant spike → sustained peak → drop-off. Locust testing is run on EC2 instances to generate enough load to trigger autoscaling, and to isolate the effects of scaling decisions.
+Uses a custom `LoadTestShape` in `locustfile.py` that simulates a ticket drop pattern: near-zero traffic → instant spike → sustained peak → drop-off. Load is generated from EC2 instances to produce enough volume to trigger autoscaling events.
 
-Control variables: queue admission rate (50), fairness mode (allow multiple), and backend (mysql) are held constant to isolate the impact of autoscaling policies. To be consistent across target and step scaling, we're using the same target CPU utilization (70%) for scaling decisions.
+Control variables held constant: queue admission rate (50), fairness mode (allow_multiple), backend (mysql).
 
-Configurations tested:
 | Configuration | Description |
 |---|---|
-| `target_aggressive` | Target tracking with low scale out cooldown (30) for aggressive scaling |
-| `target_conservative` | Target tracking with a high scale out cooldown (120) for conservative scaling |
-| `step_aggressive` | Step scaling with low scale out cooldown (30) and low thresholds for aggressive scaling |
-| `step_conservative` | Step scaling with high scale out cooldown (120) and higher thresholds for conservative scaling |
-| `no_autoscaling` | No autoscaling — fixed number of tasks (control group) |
+| `target_aggressive` | Target tracking, scale-out cooldown 30s |
+| `target_conservative` | Target tracking, scale-out cooldown 120s |
+| `step_aggressive` | Step scaling, scale-out cooldown 30s, low thresholds |
+| `step_conservative` | Step scaling, scale-out cooldown 120s, higher thresholds |
+| `no_autoscaling` | Fixed task count (control group) |
 
-```Powershell
-cd experiments/experiment3
+```bash
+# One-time: provision 5 EC2 Locust workers
+# Edit experiments/experiment3/.env to set KEY_PATH and ALB
+bash scripts/exp3-setup.sh
 
-# Edit the .env file to set your SSH key path then run:
-./setup.ps1 # (one-time setup: creates EC2 instances for load testing and copies locust file to them)
-
-# Edit the .env file to set your ALB DNS name (from Terraform outputs) then run:
-./exp3-locust-test.ps1 # Each test will take about 5 minutes to run. Results saved to experiments/experiment3/results
-
+# Run all 5 configurations
+bash scripts/exp3-locust-test.sh
 ```
-You will need to manually terminate the EC2 instances after the tests complete (the script will print the instance IDs at the end). The script automatically stops them, but they will remain in your account until you terminate them.
 
 Watch in AWS Console: ECS Service Tasks tab, CloudWatch ECS CPUUtilization, ALB Target Group healthy host count.
 
@@ -287,9 +293,6 @@ Runs all 5 events simultaneously with weighted user distribution to test whether
 ```bash
 # Run all 4 combinations (2 backends x 2 user counts)
 bash scripts/exp4-locust-test.sh
-
-# Override user counts
-USERS_LOW=500 USERS_HIGH=1000 bash scripts/exp4-locust-test.sh
 ```
 
 User distribution across events:
@@ -307,9 +310,15 @@ Results saved to `results/exp4_<timestamp>.csv`.
 
 ---
 
-### Experiment 5 — Multiple Requests from the Same User
+### Experiment 5 — Queue Fairness (collapse vs allow_multiple)
 
-Toggle fairness mode at runtime — no redeploy needed.
+Tests the impact of the queue fairness policy on latency and throughput. In `allow_multiple` mode, a single user/IP can hold multiple queue slots simultaneously, increasing throughput but reducing fairness. In `collapse` mode, each IP is deduplicated to one slot.
+
+```bash
+bash scripts/exp5-locust-test.sh
+```
+
+Toggle fairness mode at runtime — no redeploy needed:
 
 ```bash
 # Allow multiple queue slots per IP (higher throughput, less fair)
@@ -320,6 +329,8 @@ curl -X POST http://<ALB>/queue/api/v1/queue/event/evt-001/fairness-mode \
 curl -X POST http://<ALB>/queue/api/v1/queue/event/evt-001/fairness-mode \
   -H "Content-Type: application/json" -d '{"mode": "collapse"}'
 ```
+
+Results saved to `results/exp5_<timestamp>.csv`.
 
 ---
 
